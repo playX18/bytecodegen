@@ -1,0 +1,13 @@
+syn::custom_keyword!(section);
+syn::custom_keyword!(group);
+syn::custom_keyword!(args);
+syn::custom_keyword!(metadata);
+syn::custom_keyword!(tmps);
+syn::custom_keyword!(checkpoints);
+syn::custom_keyword!(preserve_order);
+syn::custom_keyword!(absolute);
+syn::custom_keyword!(debug);
+syn::custom_keyword!(relative_next);
+syn::custom_keyword!(verify);
+syn::custom_keyword!(stack_balance);
+syn::custom_keyword!(jump_target_valid);
