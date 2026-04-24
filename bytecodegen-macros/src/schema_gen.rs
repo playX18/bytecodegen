@@ -5,7 +5,7 @@ use crate::doc_gen::{combine_doc_attrs, opcode_id_doc_lines, section_doc_lines};
 use crate::group_gen::{generate_group_items, generate_section_items};
 use crate::hash::schema_macro_suffix;
 use crate::interpreter_gen::generate_interpreter_macro_items;
-use crate::model::SchemaModel;
+use crate::model::{EncodingModel, SchemaModel};
 use crate::opcode_gen::generate_opcode_items;
 
 pub(crate) fn generate_schema(schema: &SchemaModel, crate_path: &TokenStream2) -> TokenStream2 {
@@ -253,6 +253,71 @@ pub(crate) fn generate_schema(schema: &SchemaModel, crate_path: &TokenStream2) -
         let ident = &opcode.name.ident;
         quote!(Self::#ident(opcode) => <#ident as #crate_path::core::Emit>::smallest_width(opcode),)
     });
+
+    let packed_instruction_word_len_arms = schema.opcodes.iter().map(|opcode| {
+        let ident = &opcode.name.ident;
+        quote!(Self::#ident(opcode) => <#ident as #crate_path::core::PackedEmit>::packed_word_len(opcode),)
+    });
+
+    let packed_instruction_encode_arms = schema.opcodes.iter().map(|opcode| {
+        let ident = &opcode.name.ident;
+        quote!(Self::#ident(opcode) => <#ident as #crate_path::core::PackedEncode>::encode_packed_to_words(opcode),)
+    });
+
+    let packed_instruction_decode_record_arms = schema.opcodes.iter().map(|opcode| {
+        let ident = &opcode.name.ident;
+        quote! {
+            if words.len() == #ident::__packed_layout().word_count {
+                matched_layout = true;
+                match <#ident as #crate_path::core::PackedDecode>::decode_packed_words(words) {
+                    Ok(opcode) => {
+                        let raw_words = words.to_vec().into_boxed_slice();
+                        let raw_bytes = #crate_path::core::packed_words_to_bytes(words).into_boxed_slice();
+                        return Ok(PackedDecodedInstruction {
+                            instruction: Instruction::#ident(opcode),
+                            word_offset: 0,
+                            word_len: words.len(),
+                            byte_offset: 0,
+                            byte_len: raw_bytes.len(),
+                            raw_words,
+                            raw_bytes,
+                        });
+                    }
+                    Err(#crate_path::core::DecodeError::InvalidOpcode(opcode)) => {
+                        invalid_opcode.get_or_insert(opcode);
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+        }
+    });
+
+    let packed_instruction_decode_record_from_arms =
+        schema.opcodes.iter().enumerate().map(|(index, opcode)| {
+            let ident = &opcode.name.ident;
+            let opcode_value = index as u32;
+            quote! {
+                #opcode_value => {
+                    let word_len = #ident::__packed_layout().word_count;
+                    let end = word_offset + word_len;
+                    let slice = words
+                        .get(word_offset..end)
+                        .ok_or(#crate_path::core::DecodeError::UnexpectedEof)?;
+                    let opcode = <#ident as #crate_path::core::PackedDecode>::decode_packed_words(slice)?;
+                    let raw_words = slice.to_vec().into_boxed_slice();
+                    let raw_bytes = #crate_path::core::packed_words_to_bytes(slice).into_boxed_slice();
+                    Ok(PackedDecodedInstruction {
+                        instruction: Instruction::#ident(opcode),
+                        word_offset,
+                        word_len,
+                        byte_offset: word_offset * 4,
+                        byte_len: raw_bytes.len(),
+                        raw_words,
+                        raw_bytes,
+                    })
+                }
+            }
+        });
 
     let instruction_disassemble_bounds = schema.opcodes.iter().map(|opcode| {
         let ident = &opcode.name.ident;
@@ -977,6 +1042,284 @@ pub(crate) fn generate_schema(schema: &SchemaModel, crate_path: &TokenStream2) -
 
     let schema_opcode_len = schema.opcodes.len();
     let macro_suffix = schema_macro_suffix(schema);
+    let packed_schema_items = match schema.encoding {
+        EncodingModel::Packed { .. } => quote! {
+            pub struct PackedDecodedInstruction {
+                pub instruction: Instruction,
+                pub word_offset: usize,
+                pub word_len: usize,
+                pub byte_offset: usize,
+                pub byte_len: usize,
+                pub raw_words: Box<[u32]>,
+                pub raw_bytes: Box<[u8]>,
+            }
+
+            impl Instruction {
+                pub fn encode_packed_to_words(&self) -> Result<Vec<u32>, #crate_path::core::EmitError> {
+                    <Self as #crate_path::core::PackedEncode>::encode_packed_to_words(self)
+                }
+
+                pub fn encode_packed_to_bytes(&self) -> Result<Vec<u8>, #crate_path::core::EmitError> {
+                    let words = self.encode_packed_to_words()?;
+                    Ok(#crate_path::core::packed_words_to_bytes(&words))
+                }
+
+                pub fn decode_packed_record(
+                    words: &[u32],
+                ) -> Result<PackedDecodedInstruction, #crate_path::core::DecodeError> {
+                    let mut matched_layout = false;
+                    let mut invalid_opcode = None;
+                    #(#packed_instruction_decode_record_arms)*
+
+                    if let Some(opcode) = invalid_opcode {
+                        return Err(#crate_path::core::DecodeError::InvalidOpcode(opcode));
+                    }
+
+                    Err(#crate_path::core::DecodeError::InvalidValue(if matched_layout {
+                        "packed words did not match any generated opcode"
+                    } else {
+                        "packed word input length must match a generated opcode layout"
+                    }))
+                }
+
+                pub fn decode_packed_record_from(
+                    words: &[u32],
+                    word_offset: usize,
+                ) -> Result<PackedDecodedInstruction, #crate_path::core::DecodeError> {
+                    let opcode = words
+                        .get(word_offset)
+                        .copied()
+                        .map(|word| #crate_path::core::extract_packed_bits(word, 0, 8))
+                        .ok_or(#crate_path::core::DecodeError::UnexpectedEof)?;
+
+                    match opcode {
+                        #(#packed_instruction_decode_record_from_arms,)*
+                        _ => Err(#crate_path::core::DecodeError::InvalidOpcode(opcode)),
+                    }
+                }
+
+                pub fn decode_packed_words(
+                    words: &[u32],
+                ) -> Result<Self, #crate_path::core::DecodeError> {
+                    Ok(Self::decode_packed_record(words)?.instruction)
+                }
+
+                pub fn decode_packed_bytes(
+                    bytes: &[u8],
+                ) -> Result<Self, #crate_path::core::DecodeError> {
+                    let words = #crate_path::core::packed_bytes_to_words(bytes)?;
+                    Self::decode_packed_words(&words)
+                }
+            }
+
+            impl PackedDecodedInstruction {
+                fn format_spec_with_bytes_width(
+                    &self,
+                    ordinal: usize,
+                    bytes_column_width: usize,
+                ) -> #crate_path::core::InstructionFormatSpec<'_> {
+                    #crate_path::core::InstructionFormatSpec {
+                        ordinal,
+                        offset: self.byte_offset,
+                        size: self.byte_len,
+                        width: #crate_path::core::OperandWidth::Wide32,
+                        opcode_name: self.instruction.opcode_id().name(),
+                        raw_bytes: &self.raw_bytes,
+                        raw_words: Some(&self.raw_words),
+                        bytes_column_width,
+                    }
+                }
+
+                pub fn format_spec(
+                    &self,
+                    ordinal: usize,
+                ) -> #crate_path::core::InstructionFormatSpec<'_> {
+                    let bytes_column_width = #crate_path::core::rendered_words_width(&self.raw_words);
+                    self.format_spec_with_bytes_width(ordinal, bytes_column_width)
+                }
+
+                fn disassemble_into_with_bytes_width<Ctx, Formatter>(
+                    &self,
+                    output: &mut dyn std::fmt::Write,
+                    ordinal: usize,
+                    bytes_column_width: usize,
+                    context: &Ctx,
+                    formatter: &Formatter,
+                    options: &#crate_path::core::DisassemblerOptions,
+                ) -> Result<(), #crate_path::core::DisassembleError>
+                where
+                    Instruction: #crate_path::core::Disassemble<Ctx, Formatter>,
+                {
+                    let instruction = self.format_spec_with_bytes_width(ordinal, bytes_column_width);
+                    <Instruction as #crate_path::core::Disassemble<Ctx, Formatter>>::disassemble_into(
+                        &self.instruction,
+                        output,
+                        context,
+                        formatter,
+                        instruction,
+                        options,
+                    )
+                    .map_err(#crate_path::core::DisassembleError::from)
+                }
+
+                pub fn disassemble_into<Ctx, Formatter>(
+                    &self,
+                    output: &mut dyn std::fmt::Write,
+                    ordinal: usize,
+                    context: &Ctx,
+                    formatter: &Formatter,
+                    options: &#crate_path::core::DisassemblerOptions,
+                ) -> Result<(), #crate_path::core::DisassembleError>
+                where
+                    Instruction: #crate_path::core::Disassemble<Ctx, Formatter>,
+                {
+                    let bytes_column_width = if options.show_bytes {
+                        #crate_path::core::rendered_words_width(&self.raw_words)
+                    } else {
+                        0
+                    };
+                    self.disassemble_into_with_bytes_width(
+                        output,
+                        ordinal,
+                        bytes_column_width,
+                        context,
+                        formatter,
+                        options,
+                    )
+                }
+
+                pub fn disassemble_with<Ctx, Formatter>(
+                    &self,
+                    ordinal: usize,
+                    context: &Ctx,
+                    formatter: &Formatter,
+                    options: &#crate_path::core::DisassemblerOptions,
+                ) -> Result<String, #crate_path::core::DisassembleError>
+                where
+                    Instruction: #crate_path::core::Disassemble<Ctx, Formatter>,
+                {
+                    let mut output = String::new();
+                    self.disassemble_into(&mut output, ordinal, context, formatter, options)?;
+                    Ok(output)
+                }
+            }
+
+            impl #crate_path::core::PackedEncode for Instruction {
+                fn encode_packed_to_words(&self) -> Result<Vec<u32>, #crate_path::core::EmitError> {
+                    match self {
+                        #(#packed_instruction_encode_arms)*
+                    }
+                }
+            }
+
+            impl #crate_path::core::PackedDecode for Instruction {
+                fn decode_packed_words(words: &[u32]) -> Result<Self, #crate_path::core::DecodeError> {
+                    Self::decode_packed_words(words)
+                }
+            }
+
+            impl #crate_path::core::PackedEmit for Instruction {
+                fn packed_word_len(&self) -> usize {
+                    match self {
+                        #(#packed_instruction_word_len_arms)*
+                    }
+                }
+            }
+
+            pub fn disassemble_packed_words<Ctx>(
+                words: &[u32],
+                context: &Ctx,
+                options: &#crate_path::core::DisassemblerOptions,
+            ) -> Result<String, #crate_path::core::DisassembleError>
+            where
+                Instruction: #crate_path::core::Disassemble<
+                    Ctx,
+                    #crate_path::core::DefaultOperandFormatter,
+                >,
+            {
+                let formatter = #crate_path::core::DefaultOperandFormatter;
+                disassemble_packed_words_with(words, context, &formatter, options)
+            }
+
+            pub fn disassemble_packed_words_with<Ctx, Formatter>(
+                words: &[u32],
+                context: &Ctx,
+                formatter: &Formatter,
+                options: &#crate_path::core::DisassemblerOptions,
+            ) -> Result<String, #crate_path::core::DisassembleError>
+            where
+                Instruction: #crate_path::core::Disassemble<Ctx, Formatter>,
+            {
+                let mut word_offset = 0usize;
+                let mut decoded = Vec::new();
+
+                while word_offset < words.len() {
+                    let instruction = Instruction::decode_packed_record_from(words, word_offset)?;
+                    word_offset += instruction.word_len;
+                    decoded.push(instruction);
+                }
+
+                let bytes_column_width = if options.show_bytes {
+                    decoded
+                        .iter()
+                        .map(|instruction| {
+                            #crate_path::core::rendered_words_width(&instruction.raw_words)
+                        })
+                        .max()
+                        .unwrap_or(0)
+                } else {
+                    0
+                };
+
+                let mut output = String::new();
+                for (ordinal, instruction) in decoded.iter().enumerate() {
+                    if ordinal > 0 {
+                        output.push('\n');
+                    }
+
+                    instruction.disassemble_into_with_bytes_width(
+                        &mut output,
+                        ordinal,
+                        bytes_column_width,
+                        context,
+                        formatter,
+                        options,
+                    )?;
+                }
+
+                Ok(output)
+            }
+
+            pub fn disassemble_packed_bytes<Ctx>(
+                bytes: &[u8],
+                context: &Ctx,
+                options: &#crate_path::core::DisassemblerOptions,
+            ) -> Result<String, #crate_path::core::DisassembleError>
+            where
+                Instruction: #crate_path::core::Disassemble<
+                    Ctx,
+                    #crate_path::core::DefaultOperandFormatter,
+                >,
+            {
+                let formatter = #crate_path::core::DefaultOperandFormatter;
+                disassemble_packed_bytes_with(bytes, context, &formatter, options)
+            }
+
+            pub fn disassemble_packed_bytes_with<Ctx, Formatter>(
+                bytes: &[u8],
+                context: &Ctx,
+                formatter: &Formatter,
+                options: &#crate_path::core::DisassemblerOptions,
+            ) -> Result<String, #crate_path::core::DisassembleError>
+            where
+                Instruction: #crate_path::core::Disassemble<Ctx, Formatter>,
+            {
+                let words = #crate_path::core::packed_bytes_to_words(bytes)?;
+                disassemble_packed_words_with(&words, context, formatter, options)
+            }
+        },
+        EncodingModel::Bytes => quote!(),
+    };
     let interpreter_macro_items =
         generate_interpreter_macro_items(schema, crate_path, &macro_suffix);
 
@@ -1543,6 +1886,8 @@ pub(crate) fn generate_schema(schema: &SchemaModel, crate_path: &TokenStream2) -
                 pub raw_bytes: Box<[u8]>,
             }
 
+            #packed_schema_items
+
             impl Instruction {
                 pub fn decode(input: &[u8]) -> Result<Self, #crate_path::core::DecodeError> {
                     let mut cursor = #crate_path::core::ByteCursor::new(input);
@@ -1629,6 +1974,7 @@ pub(crate) fn generate_schema(schema: &SchemaModel, crate_path: &TokenStream2) -
                         width: self.width,
                         opcode_name: self.instruction.opcode_id().name(),
                         raw_bytes: &self.raw_bytes,
+                        raw_words: None,
                         bytes_column_width,
                     }
                 }

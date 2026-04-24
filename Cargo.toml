@@ -10,9 +10,6 @@ members = [".", "bytecodegen-core", "bytecodegen-macros"]
 bytecodegen-core = { path = "bytecodegen-core" }
 bytecodegen-macros = { path = "bytecodegen-macros" }
 
-[dev-dependencies]
-trybuild = "1.0.112"
-
 [workspace.package]
 edition = "2024"
 version = "0.1.0"

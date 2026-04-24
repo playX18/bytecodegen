@@ -156,8 +156,63 @@ macro_rules! impl_signed_encoding {
     };
 }
 
+macro_rules! impl_optional_zero_sentinel {
+    ($($ty:ty),* $(,)?) => {
+        $(
+            impl OptionalOperand for $ty {
+                fn encode_optional<S: ByteSink + ?Sized>(
+                    value: Option<&Self>,
+                    width: OperandWidth,
+                    output: &mut S,
+                ) {
+                    match value {
+                        Some(v) => <Self as Operand>::encode(v, width, output),
+                        None => <Self as Operand>::encode(&<$ty>::default(), width, output),
+                    }
+                }
+
+                fn decode_optional(
+                    width: OperandWidth,
+                    input: &mut ByteCursor<'_>,
+                ) -> Result<Option<Self>, DecodeError> {
+                    let value = <Self as Operand>::decode(width, input)?;
+                    if value == <$ty>::default() {
+                        Ok(None)
+                    } else {
+                        Ok(Some(value))
+                    }
+                }
+
+                fn fits_optional(value: Option<&Self>, width: OperandWidth) -> bool {
+                    match value {
+                        Some(v) => <Self as Operand>::fits_width(v, width),
+                        None => true,
+                    }
+                }
+
+                fn can_decode_from_ptr_optional() -> bool {
+                    <Self as Operand>::can_decode_from_ptr()
+                }
+
+                unsafe fn decode_optional_from_ptr(
+                    width: OperandWidth,
+                    input: *const u8,
+                ) -> (Option<Self>, *const u8) {
+                    let (value, next) = unsafe { <Self as Operand>::decode_from_ptr(width, input) };
+                    if value == <$ty>::default() {
+                        (None, next)
+                    } else {
+                        (Some(value), next)
+                    }
+                }
+            }
+        )*
+    };
+}
+
 impl_unsigned_encoding!(u8, u16, u32, usize);
 impl_signed_encoding!(i8, i16, i32, isize);
+impl_optional_zero_sentinel!(u8, u16, u32, usize, i8, i16, i32, isize);
 
 impl Operand for bool {
     fn fits_width(_value: &Self, _width: OperandWidth) -> bool {

@@ -75,6 +75,13 @@ pub enum EmitError {
         /// Width that failed validation.
         width: OperandWidth,
     },
+    /// A packed primitive value did not fit the declared bit width.
+    PackedValueDoesNotFit {
+        /// Rust type name used in the error message.
+        type_name: &'static str,
+        /// Declared bit width.
+        bit_width: u8,
+    },
 }
 
 impl fmt::Display for EmitError {
@@ -82,6 +89,12 @@ impl fmt::Display for EmitError {
         match self {
             Self::WidthDoesNotFit { opcode, width } => {
                 write!(f, "{opcode} does not fit in {width:?}")
+            }
+            Self::PackedValueDoesNotFit {
+                type_name,
+                bit_width,
+            } => {
+                write!(f, "{type_name} does not fit in {bit_width} bits")
             }
         }
     }

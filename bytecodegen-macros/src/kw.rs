@@ -1,9 +1,14 @@
 syn::custom_keyword!(section);
 syn::custom_keyword!(group);
+syn::custom_keyword!(encoding);
+syn::custom_keyword!(packed);
 syn::custom_keyword!(args);
 syn::custom_keyword!(metadata);
 syn::custom_keyword!(tmps);
 syn::custom_keyword!(checkpoints);
+syn::custom_keyword!(layout);
+syn::custom_keyword!(word);
+syn::custom_keyword!(word_bits);
 syn::custom_keyword!(preserve_order);
 syn::custom_keyword!(absolute);
 syn::custom_keyword!(debug);

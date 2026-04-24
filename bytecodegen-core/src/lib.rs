@@ -21,6 +21,7 @@ mod disassembly;
 mod encoding;
 mod error;
 mod metadata;
+mod packed;
 mod traits;
 mod verify;
 mod width;
@@ -30,6 +31,13 @@ pub use byte_io::{
     encode_instruction_header,
 };
 pub use error::{DecodeError, DisassembleError, EmitError, LinkError};
+pub use packed::{
+    PackedDecode, PackedEmit, PackedEncode, PackedFieldPlacement, PackedFieldPlacementRef,
+    PackedFieldRef, PackedLayoutError, PackedLayoutPlan, PackedLayoutRef, PackedOperand,
+    PackedOperandSpec, PackedOptionalOperand, PackedWordSpec, extract_packed_bits,
+    insert_packed_bits, packed_bytes_to_words, packed_mask, packed_words_to_bytes,
+    plan_packed_layout, sign_extend_packed,
+};
 pub use traits::{
     Decode, DefaultOperandFormatter, Disassemble, Emit, Encode, FormatOperand, InstructionSpec,
     Operand, OptionalOperand,
@@ -42,7 +50,7 @@ pub use width::{
 pub use debug::{DebugId, DebugMap, DebugTable, LinkedDebugInfo, LinkedProgram};
 pub use disassembly::{
     DisassemblerOptions, DisassemblyLabel, InstructionFormatSpec, MnemonicCase, OperandFormatSpec,
-    opcode_mnemonic, rendered_bytes_width, write_disassembly_prefix,
+    opcode_mnemonic, rendered_bytes_width, rendered_words_width, write_disassembly_prefix,
 };
 pub use metadata::{
     LinkAllocations, LinkBackendV2, LinkSpec, LinkedArtifactSpec, LinkedBytecodeView,

@@ -1,3 +1,4 @@
+use proc_macro2::Span;
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
 use syn::{
@@ -9,16 +10,73 @@ use crate::doc::{DocBlock, extract_doc_string};
 use crate::kw;
 
 pub(crate) struct SchemaInput {
+    pub encoding: Option<EncodingDecl>,
     pub sections: Vec<SectionDecl>,
 }
 
 impl Parse for SchemaInput {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let encoding = if input.peek(kw::encoding) {
+            Some(input.parse()?)
+        } else {
+            None
+        };
         let mut sections = Vec::new();
         while !input.is_empty() {
             sections.push(input.parse()?);
         }
-        Ok(Self { sections })
+        Ok(Self { encoding, sections })
+    }
+}
+
+pub(crate) enum EncodingDecl {
+    Packed(PackedEncodingDecl),
+}
+
+impl Parse for EncodingDecl {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        input.parse::<kw::encoding>()?;
+        input.parse::<Token![=]>()?;
+        let encoding = if input.peek(kw::packed) {
+            Self::Packed(input.parse()?)
+        } else {
+            return Err(Error::new(
+                input.span(),
+                "expected `packed` encoding declaration",
+            ));
+        };
+        input.parse::<Token![;]>()?;
+        Ok(encoding)
+    }
+}
+
+pub(crate) struct PackedEncodingDecl {
+    pub word_bits_span: Span,
+    pub word_bits: u8,
+}
+
+impl Parse for PackedEncodingDecl {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        input.parse::<kw::packed>()?;
+        let content;
+        braced!(content in input);
+
+        content.parse::<kw::word_bits>()?;
+        content.parse::<Token![=]>()?;
+        let word_bits_lit: LitInt = content.parse()?;
+        let word_bits_span = word_bits_lit.span();
+        let word_bits = word_bits_lit.base10_parse()?;
+        if !content.is_empty() {
+            return Err(Error::new(
+                content.span(),
+                "unexpected token in packed encoding declaration",
+            ));
+        }
+
+        Ok(Self {
+            word_bits_span,
+            word_bits,
+        })
     }
 }
 
@@ -110,6 +168,14 @@ pub(crate) struct OpcodeDecl {
     pub name: Ident,
     pub body: BodyDecl,
     pub verify: Option<VerifyDecl>,
+}
+
+impl std::fmt::Debug for OpcodeDecl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpcodeDecl")
+            .field("name", &self.name)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Parse for OpcodeDecl {
@@ -226,11 +292,72 @@ impl Parse for GroupDecl {
 }
 
 #[derive(Clone)]
+pub(crate) struct LayoutDecl {
+    pub span: Span,
+    pub words: Vec<LayoutWordDecl>,
+}
+
+impl Parse for LayoutDecl {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let span = input.span();
+        let content;
+        braced!(content in input);
+        let mut words = Vec::new();
+        while !content.is_empty() {
+            content.parse::<kw::word>()?;
+            words.push(content.parse()?);
+        }
+        Ok(Self { span, words })
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct LayoutWordDecl {
+    pub slices: Vec<LayoutSliceDecl>,
+}
+
+impl Parse for LayoutWordDecl {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let content;
+        braced!(content in input);
+        let mut slices = Vec::new();
+        while !content.is_empty() {
+            slices.push(content.parse()?);
+            if content.peek(Token![,]) {
+                content.parse::<Token![,]>()?;
+            }
+        }
+        Ok(Self { slices })
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct LayoutSliceDecl {
+    pub name: Ident,
+    pub width_bits: u8,
+}
+
+impl Parse for LayoutSliceDecl {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let name = if input.peek(Token![_]) {
+            let underscore = input.parse::<Token![_]>()?;
+            Ident::new("_", underscore.span)
+        } else {
+            input.parse()?
+        };
+        input.parse::<Token![:]>()?;
+        let width_bits = input.parse::<LitInt>()?.base10_parse()?;
+        Ok(Self { name, width_bits })
+    }
+}
+
+#[derive(Clone)]
 pub(crate) struct BodyDecl {
     pub args: Vec<FieldDecl>,
     pub metadata: Vec<FieldDecl>,
     pub tmps: Vec<FieldDecl>,
     pub checkpoints: Vec<CheckpointDecl>,
+    pub layout: Option<LayoutDecl>,
 }
 
 impl Parse for BodyDecl {
@@ -242,6 +369,7 @@ impl Parse for BodyDecl {
         let mut metadata = None;
         let mut tmps = None;
         let mut checkpoints = None;
+        let mut layout = None;
 
         while !content.is_empty() {
             if content.peek(kw::args) {
@@ -280,6 +408,15 @@ impl Parse for BodyDecl {
                 continue;
             }
 
+            if content.peek(kw::layout) {
+                if layout.is_some() {
+                    return Err(Error::new(content.span(), "duplicate layout block"));
+                }
+                content.parse::<kw::layout>()?;
+                layout = Some(content.parse()?);
+                continue;
+            }
+
             return Err(Error::new(
                 content.span(),
                 "unexpected token in opcode body",
@@ -291,6 +428,7 @@ impl Parse for BodyDecl {
             metadata: metadata.unwrap_or_default(),
             tmps: tmps.unwrap_or_default(),
             checkpoints: checkpoints.unwrap_or_default(),
+            layout,
         })
     }
 }
@@ -451,3 +589,4 @@ impl Parse for CheckpointDecl {
         })
     }
 }
+

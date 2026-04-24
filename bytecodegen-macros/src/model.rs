@@ -80,6 +80,28 @@ impl RelocationModel {
 }
 
 #[derive(Clone)]
+pub(crate) struct LayoutSliceModel {
+    pub(crate) name: String,
+    pub(crate) width_bits: u8,
+}
+
+#[derive(Clone)]
+pub(crate) struct LayoutWordModel {
+    pub(crate) slices: Vec<LayoutSliceModel>,
+}
+
+#[derive(Clone)]
+pub(crate) struct LayoutModel {
+    pub(crate) words: Vec<LayoutWordModel>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum EncodingModel {
+    Bytes,
+    Packed { word_bits: u8 },
+}
+
+#[derive(Clone)]
 pub(crate) struct CheckpointModel {
     pub(crate) docs: DocBlock,
     pub(crate) ident: Ident,
@@ -101,6 +123,7 @@ pub(crate) struct BodyModel {
     pub(crate) metadata: Vec<FieldModel>,
     pub(crate) tmps: Vec<FieldModel>,
     pub(crate) checkpoints: Vec<CheckpointModel>,
+    pub(crate) layout: Option<LayoutModel>,
 }
 
 impl BodyModel {
@@ -122,6 +145,8 @@ pub(crate) struct OpcodeModel {
     pub(crate) section: NameModel,
     pub(crate) body: BodyModel,
     pub(crate) verify: Option<VerifyModel>,
+    #[allow(dead_code)]
+    pub(crate) packed_layout: Option<bytecodegen_core::PackedLayoutPlan>,
 }
 
 #[derive(Clone)]
@@ -177,6 +202,8 @@ pub(crate) enum SourceItemModel {
 }
 
 pub(crate) struct SchemaModel {
+    #[allow(dead_code)]
+    pub(crate) encoding: EncodingModel,
     pub(crate) sections: Vec<SectionModel>,
     pub(crate) opcodes: Vec<OpcodeModel>,
     pub(crate) groups: Vec<GroupModel>,

@@ -24,6 +24,67 @@ Each instruction is emitted at the smallest width that fits all of its operands 
 
 Widening is instruction-wide. If one field does not fit, the whole instruction is promoted. That keeps operand offsets regular and decoding simple.
 
+## Packed word encoding
+
+The DSL also supports packed 32-bit words for word-addressed instruction records:
+
+```rust
+use bytecodegen::{bytecode_list};
+
+bytecode_list! {
+    encoding = packed { word_bits = 32 };
+
+    section Bytecode {
+        LoadConst {
+            args { dst: u8, value: i32 }
+        }
+
+        Add {
+            args { dst: u8, lhs: u8, rhs: u8 }
+            layout {
+                word { op: 8, dst: 8, lhs: 8, rhs: 8 }
+            }
+        }
+    }
+}
+
+fn main() {
+    let words = LoadConst::new(0, 42).encode_packed_to_words().unwrap();
+    let decoded = LoadConst::decode_packed_words(&words).unwrap();
+
+    assert_eq!(decoded.dst, 0);
+    assert_eq!(decoded.value, 42);
+}
+```
+
+`encoding = packed { word_bits = 32 };` switches the whole schema from the variable-width byte stream to packed words. `word_bits = 32` is currently the supported setting, so each emitted record is a `Vec<u32>` or little-endian byte sequence derived from those words.
+
+When an opcode does not declare `layout { ... }`, the macro synthesizes one automatically. The synthesized layout starts with `op: 8` in word 0 and then packs operands least-significant-bit first across as many 32-bit words as needed.
+
+Use an explicit `layout` block when you need a stable external bit layout:
+
+```rust
+Add {
+    args { dst: u8, lhs: u8, rhs: u8 }
+    layout {
+        word { op: 8, dst: 8, lhs: 8, rhs: 8 }
+    }
+}
+```
+
+Explicit layouts must fully account for every packed operand and must include `op: 8` in the first word. This makes the chosen word layout visible and reviewable instead of relying on the synthesized packing plan.
+
+Packed schemas generate extra helpers on each opcode type and on the section `Instruction` enum:
+
+- `encode_packed_to_words()`
+- `encode_packed_to_bytes()`
+- `decode_packed_words(...)`
+- `decode_packed_bytes(...)`
+
+Use word helpers when your runtime naturally stores records as `u32` words, and use the byte helpers when you need a serialized little-endian representation.
+
+Packed optional operands currently use an all-zero sentinel for `None`. That keeps encoding simple, but it also means optional packed fields reserve the zero/default representation rather than treating it as an ordinary payload value.
+
 ## Linking and metadata
 
 Linking resolves relocatable operands and builds a packed metadata table for instructions that declare runtime payloads. The instruction stream stores only a `metadata_id`; the actual typed metadata lives in a separate allocation indexed by opcode and slot.
@@ -51,4 +112,5 @@ The examples directory shows the intended workflow:
 
 - [examples/interpreters.rs](./examples/interpreters.rs): encoding, linking, disassembly, and interpreter execution
 - [examples/debug_dsl.rs](./examples/debug_dsl.rs): debug metadata and source mapping
+- [examples/packed_dsl.rs](./examples/packed_dsl.rs): packed 32-bit word encoding with synthesized and explicit layouts
 - [examples/verify_dsl.rs](./examples/verify_dsl.rs): validation of bytecode definitions. NOTE: this is a work in progress, only jump target and stack depth verification are implemented so far.

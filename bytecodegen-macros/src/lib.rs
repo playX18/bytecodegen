@@ -12,6 +12,7 @@ mod kw;
 mod model;
 mod names;
 mod opcode_gen;
+mod packed_gen;
 mod parse;
 mod schema_gen;
 

@@ -1,45 +1,38 @@
 use std::collections::{HashMap, HashSet};
+use proc_macro2::Span;
 
-use proc_macro_crate::{FoundCrate, crate_name};
-use proc_macro2::{Span, TokenStream as TokenStream2};
-use quote::{format_ident, quote};
 use syn::spanned::Spanned;
-use syn::{Error, GenericArgument, Ident, Result, Type};
+use syn::{Error, Ident, Result};
 
 use crate::doc::DocBlock;
 use crate::model::{
-    BodyModel, CheckpointModel, DebugModel, FieldModel, GroupModel, NameModel, OpcodeModel,
-    RelocationModel, SchemaModel, SectionModel, SourceItemModel, VerifyKind as VerifyKindModel,
-    VerifyModel,
+    BodyModel, CheckpointModel, DebugModel, EncodingModel, FieldModel, GroupModel, LayoutModel,
+    LayoutSliceModel, LayoutWordModel, NameModel, OpcodeModel, RelocationModel, SchemaModel, SectionModel,
+    SourceItemModel, VerifyKind as VerifyKindModel, VerifyModel,
 };
 use crate::parse::{
-    BodyDecl, CheckpointDecl, DebugDecl, FieldDecl, GroupDecl, OpcodeDecl, RelocationDecl,
-    SchemaInput, SectionItemDecl, VerifyKind as VerifyKindDecl,
+    BodyDecl, CheckpointDecl, DebugDecl, FieldDecl, GroupDecl, LayoutDecl, OpcodeDecl,
+    RelocationDecl, SectionItemDecl, VerifyKind as VerifyKindDecl,
 };
-use crate::schema_gen::generate_schema;
 
-pub(crate) fn compile_schema(input: SchemaInput) -> Result<TokenStream2> {
-    let crate_path = bytecodegen_path()?;
-    let schema = SchemaModel::build(input)?;
-    Ok(generate_schema(&schema, &crate_path))
-}
+use super::packed::plan_body_packed_layout;
+use super::validation::{validate_packed_encoding, validate_packed_opcode_count};
 
-pub(crate) fn bytecodegen_path() -> Result<TokenStream2> {
-    match crate_name("bytecodegen") {
-        Ok(FoundCrate::Itself) => Ok(quote!(::bytecodegen)),
-        Ok(FoundCrate::Name(name)) => {
-            let ident = format_ident!("{name}");
-            Ok(quote!(::#ident))
-        }
-        Err(error) => Err(Error::new(
-            Span::call_site(),
-            format!("failed to resolve bytecodegen crate: {error}"),
-        )),
-    }
+pub(crate) fn is_packed_encoding(encoding: EncodingModel) -> bool {
+    matches!(encoding, EncodingModel::Packed { .. })
 }
 
 impl SchemaModel {
-    pub(crate) fn build(input: SchemaInput) -> Result<Self> {
+    pub(crate) fn build(input: crate::parse::SchemaInput) -> Result<Self> {
+        let encoding = match input.encoding {
+            Some(crate::parse::EncodingDecl::Packed(packed)) => {
+                validate_packed_encoding(&packed)?;
+                EncodingModel::Packed {
+                    word_bits: packed.word_bits,
+                }
+            }
+            None => EncodingModel::Bytes,
+        };
         let mut section_name_map = HashMap::<String, Span>::new();
         let mut opcode_name_map = HashMap::<String, Span>::new();
         let mut group_name_map = HashMap::<String, Span>::new();
@@ -64,7 +57,7 @@ impl SchemaModel {
             for item in section_decl.items {
                 match item {
                     SectionItemDecl::Opcode(opcode_decl) => {
-                        let opcode = build_opcode(opcode_decl, &section_name)?;
+                        let opcode = build_opcode(opcode_decl, &section_name, encoding)?;
                         ensure_unique(
                             &mut opcode_name_map,
                             opcode.name.snake_case.clone(),
@@ -78,10 +71,15 @@ impl SchemaModel {
                             "opcode",
                         )?;
                         opcodes_in_source_order.push(opcode.clone());
+                        validate_packed_opcode_count(
+                            encoding,
+                            all_opcodes.len() + opcodes_in_source_order.len(),
+                            opcode.name.ident.span(),
+                        )?;
                         source_items.push(SourceItemModel::Opcode(opcode));
                     }
                     SectionItemDecl::Group(group_decl) => {
-                        let group = build_group(group_decl, &section_name)?;
+                        let group = build_group(group_decl, &section_name, encoding)?;
                         ensure_unique(
                             &mut group_name_map,
                             group.name.snake_case.clone(),
@@ -113,7 +111,17 @@ impl SchemaModel {
                                 section: section_name.clone(),
                                 body: group.body.clone(),
                                 verify: None,
+                                packed_layout: plan_body_packed_layout(
+                                    &member,
+                                    &group.body,
+                                    encoding,
+                                )?,
                             });
+                            validate_packed_opcode_count(
+                                encoding,
+                                all_opcodes.len() + opcodes_in_source_order.len(),
+                                member.ident.span(),
+                            )?;
                         }
                         all_groups.push(group.clone());
                         source_items.push(SourceItemModel::Group(group));
@@ -145,6 +153,7 @@ impl SchemaModel {
         }
 
         Ok(Self {
+            encoding,
             sections,
             opcodes: all_opcodes,
             groups: all_groups,
@@ -155,9 +164,10 @@ impl SchemaModel {
 pub(crate) fn build_opcode(
     opcode_decl: OpcodeDecl,
     section_name: &NameModel,
+    encoding: EncodingModel,
 ) -> Result<OpcodeModel> {
     let name = NameModel::from_ident(opcode_decl.name, true, "opcode")?;
-    let body = build_body(opcode_decl.body)?;
+    let body = build_body(opcode_decl.body, encoding)?;
     validate_opcode_semantics(&name, &body)?;
     let verify = opcode_decl.verify.map(|v| VerifyModel {
         kind: match v.kind {
@@ -166,16 +176,22 @@ pub(crate) fn build_opcode(
             VerifyKindDecl::Custom(_) => VerifyKindModel::Custom(()),
         },
     });
+    let packed_layout = plan_body_packed_layout(&name, &body, encoding)?;
     Ok(OpcodeModel {
         docs: opcode_decl.docs,
         name,
         section: section_name.clone(),
         body,
         verify,
+        packed_layout,
     })
 }
 
-pub(crate) fn build_group(group_decl: GroupDecl, section_name: &NameModel) -> Result<GroupModel> {
+pub(crate) fn build_group(
+    group_decl: GroupDecl,
+    section_name: &NameModel,
+    encoding: EncodingModel,
+) -> Result<GroupModel> {
     let name = NameModel::from_ident(group_decl.name, true, "group")?;
     if group_decl.members.is_empty() {
         return Err(Error::new(
@@ -197,7 +213,7 @@ pub(crate) fn build_group(group_decl: GroupDecl, section_name: &NameModel) -> Re
         members.push(member);
     }
 
-    let body = build_body(group_decl.body)?;
+    let body = build_body(group_decl.body, encoding)?;
     validate_opcode_semantics(&name, &body)?;
 
     Ok(GroupModel {
@@ -215,12 +231,85 @@ pub(crate) fn build_debug(debug_decl: DebugDecl) -> Result<DebugModel> {
     Ok(DebugModel { name, fields })
 }
 
-pub(crate) fn build_body(body_decl: BodyDecl) -> Result<BodyModel> {
+pub(crate) fn build_body(body_decl: BodyDecl, encoding: EncodingModel) -> Result<BodyModel> {
+    let args = build_fields_internal(
+        body_decl.args,
+        "argument",
+        true,
+        is_packed_encoding(encoding),
+    )?;
+    let layout = match body_decl.layout {
+        Some(layout_decl) => Some(build_layout(layout_decl, &args, encoding)?),
+        None => None,
+    };
+
     Ok(BodyModel {
-        args: build_fields(body_decl.args, "argument", true)?,
+        args,
         metadata: build_fields(body_decl.metadata, "metadata field", false)?,
         tmps: build_fields(body_decl.tmps, "tmp field", false)?,
         checkpoints: build_checkpoints(body_decl.checkpoints)?,
+        layout,
+    })
+}
+
+pub(crate) fn build_layout(
+    layout_decl: LayoutDecl,
+    args: &[FieldModel],
+    encoding: EncodingModel,
+) -> Result<LayoutModel> {
+    if !is_packed_encoding(encoding) {
+        return Err(Error::new(
+            layout_decl.span,
+            "layout blocks require packed encoding",
+        ));
+    }
+    if layout_decl.words.is_empty() {
+        return Err(Error::new(
+            layout_decl.span,
+            "layout blocks must declare at least one word",
+        ));
+    }
+
+    let arg_names = args.iter().map(FieldModel::name).collect::<HashSet<_>>();
+    Ok(LayoutModel {
+        words: layout_decl
+            .words
+            .into_iter()
+            .map(|word| {
+                Ok(LayoutWordModel {
+                    slices: word
+                        .slices
+                        .into_iter()
+                        .map(|slice| build_layout_slice(slice, &arg_names))
+                        .collect::<Result<Vec<_>>>()?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?,
+    })
+}
+
+pub(crate) fn build_layout_slice(
+    slice: crate::parse::LayoutSliceDecl,
+    arg_names: &HashSet<String>,
+) -> Result<LayoutSliceModel> {
+    if slice.width_bits == 0 {
+        return Err(Error::new(
+            slice.name.span(),
+            "layout slices must have non-zero width",
+        ));
+    }
+
+    let name = slice.name.to_string();
+    if name != "op" && name != "_" && !arg_names.contains(&name) {
+        return Err(Error::new(
+            slice.name.span(),
+            format!("unknown layout slice `{name}`"),
+        ));
+    }
+
+    Ok(LayoutSliceModel {
+        name,
+        width_bits: slice.width_bits,
     })
 }
 
@@ -229,11 +318,29 @@ pub(crate) fn build_fields(
     kind: &str,
     allow_relocation: bool,
 ) -> Result<Vec<FieldModel>> {
+    build_fields_internal(fields, kind, allow_relocation, false)
+}
+
+pub(crate) fn build_fields_internal(
+    fields: Vec<FieldDecl>,
+    kind: &str,
+    allow_relocation: bool,
+    packed_args: bool,
+) -> Result<Vec<FieldModel>> {
     let mut seen = HashSet::new();
     let mut output = Vec::new();
     for field in fields {
         validate_snake_case_name(&field.name, kind)?;
         validate_supported_type(&field.ty)?;
+        if packed_args {
+            if field.name == "op" {
+                return Err(Error::new(
+                    field.name.span(),
+                    "packed operands cannot be named `op` because that name is reserved for layout opcode fields",
+                ));
+            }
+            super::packed::packed_type_bits(&field.ty)?;
+        }
         if field.relocation.is_some() && !allow_relocation {
             return Err(Error::new(
                 field.name.span(),
@@ -378,28 +485,28 @@ pub(crate) fn validate_snake_case_name(ident: &Ident, kind: &str) -> Result<()> 
     Ok(())
 }
 
-pub(crate) fn validate_supported_type(ty: &Type) -> Result<()> {
+pub(crate) fn validate_supported_type(ty: &syn::Type) -> Result<()> {
     match ty {
-        Type::Path(path) => {
+        syn::Type::Path(path) => {
             for segment in &path.path.segments {
                 match &segment.arguments {
                     syn::PathArguments::None => {}
                     syn::PathArguments::AngleBracketed(arguments) => {
                         for argument in &arguments.args {
                             match argument {
-                                GenericArgument::Type(ty) => validate_supported_type(ty)?,
-                                GenericArgument::Const(_) => {}
-                                GenericArgument::AssocType(binding) => {
+                                syn::GenericArgument::Type(ty) => validate_supported_type(ty)?,
+                                syn::GenericArgument::Const(_) => {}
+                                syn::GenericArgument::AssocType(binding) => {
                                     validate_supported_type(&binding.ty)?
                                 }
-                                GenericArgument::AssocConst(_) => {}
-                                GenericArgument::Constraint(_) => {
+                                syn::GenericArgument::AssocConst(_) => {}
+                                syn::GenericArgument::Constraint(_) => {
                                     return Err(Error::new(
                                         argument.span(),
                                         "constraint generic arguments are not supported in stored operand types",
                                     ));
                                 }
-                                GenericArgument::Lifetime(_) => {
+                                syn::GenericArgument::Lifetime(_) => {
                                     return Err(Error::new(
                                         argument.span(),
                                         "lifetime-bearing operand types are not supported",
@@ -419,42 +526,42 @@ pub(crate) fn validate_supported_type(ty: &Type) -> Result<()> {
             }
             Ok(())
         }
-        Type::Ptr(pointer) => validate_supported_type(&pointer.elem),
-        Type::Array(array) => validate_supported_type(&array.elem),
-        Type::Slice(slice) => validate_supported_type(&slice.elem),
-        Type::Tuple(tuple) => {
+        syn::Type::Ptr(pointer) => validate_supported_type(&pointer.elem),
+        syn::Type::Array(array) => validate_supported_type(&array.elem),
+        syn::Type::Slice(slice) => validate_supported_type(&slice.elem),
+        syn::Type::Tuple(tuple) => {
             for elem in &tuple.elems {
                 validate_supported_type(elem)?;
             }
             Ok(())
         }
-        Type::Paren(paren) => validate_supported_type(&paren.elem),
-        Type::Group(group) => validate_supported_type(&group.elem),
-        Type::Reference(reference) => Err(Error::new(
+        syn::Type::Paren(paren) => validate_supported_type(&paren.elem),
+        syn::Type::Group(group) => validate_supported_type(&group.elem),
+        syn::Type::Reference(reference) => Err(Error::new(
             reference.span(),
             "reference operand types are not supported; store by value instead",
         )),
-        Type::BareFn(ty) => Err(Error::new(
+        syn::Type::BareFn(ty) => Err(Error::new(
             ty.span(),
             "function pointer operand types are not supported",
         )),
-        Type::ImplTrait(ty) => Err(Error::new(
+        syn::Type::ImplTrait(ty) => Err(Error::new(
             ty.span(),
             "impl Trait operand types are not supported",
         )),
-        Type::TraitObject(ty) => Err(Error::new(
+        syn::Type::TraitObject(ty) => Err(Error::new(
             ty.span(),
             "trait object operand types are not supported",
         )),
-        Type::Infer(ty) => Err(Error::new(
+        syn::Type::Infer(ty) => Err(Error::new(
             ty.span(),
             "inferred operand types are not supported",
         )),
-        Type::Macro(ty) => Err(Error::new(
+        syn::Type::Macro(ty) => Err(Error::new(
             ty.span(),
             "macro operand types are not supported",
         )),
-        Type::Never(ty) => Err(Error::new(
+        syn::Type::Never(ty) => Err(Error::new(
             ty.span(),
             "never operand types are not supported",
         )),
@@ -464,3 +571,4 @@ pub(crate) fn validate_supported_type(ty: &Type) -> Result<()> {
         )),
     }
 }
+

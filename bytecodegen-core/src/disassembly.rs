@@ -67,7 +67,9 @@ pub struct InstructionFormatSpec<'a> {
     pub opcode_name: &'a str,
     /// Exact bytes that were decoded for this instruction.
     pub raw_bytes: &'a [u8],
-    /// Width reserved for the rendered bytes column.
+    /// Exact packed words that were decoded for this instruction, when applicable.
+    pub raw_words: Option<&'a [u32]>,
+    /// Width reserved for the rendered raw-encoding column.
     pub bytes_column_width: usize,
 }
 
@@ -122,12 +124,22 @@ pub fn write_disassembly_prefix(
 
     if options.show_bytes {
         let mut rendered = String::new();
-        for (index, byte) in instruction.raw_bytes.iter().enumerate() {
-            if index > 0 {
-                rendered.push(' ');
+        if let Some(raw_words) = instruction.raw_words {
+            for (index, word) in raw_words.iter().enumerate() {
+                if index > 0 {
+                    rendered.push(' ');
+                }
+                use fmt::Write as _;
+                write!(&mut rendered, "0x{word:08x}")?;
             }
-            use fmt::Write as _;
-            write!(&mut rendered, "0x{byte:02x}")?;
+        } else {
+            for (index, byte) in instruction.raw_bytes.iter().enumerate() {
+                if index > 0 {
+                    rendered.push(' ');
+                }
+                use fmt::Write as _;
+                write!(&mut rendered, "0x{byte:02x}")?;
+            }
         }
 
         write!(
@@ -148,5 +160,14 @@ pub fn rendered_bytes_width(raw_bytes: &[u8]) -> usize {
         0
     } else {
         (raw_bytes.len() * 4) + (raw_bytes.len() - 1)
+    }
+}
+
+/// Returns the display width of `raw_words` when rendered as `0xNNNNNNNN` groups separated by spaces.
+pub fn rendered_words_width(raw_words: &[u32]) -> usize {
+    if raw_words.is_empty() {
+        0
+    } else {
+        (raw_words.len() * 10) + (raw_words.len() - 1)
     }
 }

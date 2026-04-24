@@ -6,6 +6,7 @@ use crate::doc_gen::{
     opcode_descriptor_doc_lines, opcode_struct_doc_lines, render_doc_attrs, tmp_enum_doc_lines,
 };
 use crate::model::{CheckpointModel, FieldModel, OpcodeModel};
+use crate::packed_gen::generate_packed_items;
 
 pub(crate) fn generate_opcode_items(
     opcode: &OpcodeModel,
@@ -301,6 +302,7 @@ pub(crate) fn generate_opcode_items(
     let emit_error_name = &opcode.name.upper_camel;
     let opcode_enum_ident = &opcode.name.ident;
     let has_relocations = opcode.has_relocations();
+    let packed_items = generate_packed_items(opcode, crate_path);
     let reloc_variant_ident = format_ident!("__{}Linkable", opcode.name.ident);
     let reloc_input_traits = opcode.body.args.iter().filter_map(|field| {
         let ty = &field.ty;
@@ -813,6 +815,7 @@ pub(crate) fn generate_opcode_items(
         #linkable_from
         #tmp_enum
         #checkpoint_enum
+        #packed_items
 
         impl #crate_path::core::InstructionSpec for #opcode_ident {
             type Metadata = #metadata_type;
