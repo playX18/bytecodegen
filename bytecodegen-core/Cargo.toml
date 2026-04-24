@@ -2,5 +2,10 @@
 name = "bytecodegen-core"
 version.workspace = true
 edition.workspace = true
+license = "BSD-3-Clause"
+repository = "https://github.com/playx18/bytecodegen"
+documentation = "https://docs.rs/bytecodegen-core"
+readme = "README.md"
+
 
 [dependencies]
