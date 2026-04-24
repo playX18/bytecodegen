@@ -9,13 +9,14 @@ documentation = "https://docs.rs/bytecodegen"
 
 [workspace]
 members = [".", "bytecodegen-core", "bytecodegen-macros"]
-edition = "2024"
-version = "0.1.0"
 
 [dependencies]
 bytecodegen-core = { path = "bytecodegen-core" }
 bytecodegen-macros = { path = "bytecodegen-macros" }
 
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
 
 [workspace.dependencies]
 proc-macro2 = "1.0.103"
