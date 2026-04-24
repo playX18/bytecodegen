@@ -1,9 +1,10 @@
 use std::ptr::NonNull;
 
+use crate::byte_io::{ByteCursor, ByteSink, read_ptr_u8, read_ptr_u16, read_ptr_u32};
+#[cfg(debug_assertions)]
 use crate::byte_io::{
-    ByteCursor, ByteSink, assert_non_null_ptr_decode, assert_signed_ptr_decode_fits,
-    assert_unsigned_ptr_decode_fits, assert_valid_bool_ptr_decode, read_ptr_u8, read_ptr_u16,
-    read_ptr_u32,
+    assert_non_null_ptr_decode, assert_signed_ptr_decode_fits, assert_unsigned_ptr_decode_fits,
+    assert_valid_bool_ptr_decode,
 };
 use crate::error::{DecodeError, LinkError};
 use crate::traits::{Operand, OptionalOperand};
@@ -49,6 +50,7 @@ macro_rules! impl_unsigned_encoding {
 
                 fn can_decode_from_ptr() -> bool { true }
 
+                #[inline(always)]
                 unsafe fn decode_from_ptr(width: OperandWidth, input: *const u8) -> (Self, *const u8) {
                     let (raw, next) = match width {
                         OperandWidth::Narrow => (u32::from(unsafe { read_ptr_u8(input) }), unsafe {
@@ -115,6 +117,7 @@ macro_rules! impl_signed_encoding {
 
                 fn can_decode_from_ptr() -> bool { true }
 
+                #[inline(always)]
                 unsafe fn decode_from_ptr(width: OperandWidth, input: *const u8) -> (Self, *const u8) {
                     let (raw, next) = match width {
                         OperandWidth::Narrow => (
@@ -241,6 +244,7 @@ impl Operand for bool {
         true
     }
 
+    #[inline(always)]
     unsafe fn decode_from_ptr(width: OperandWidth, input: *const u8) -> (Self, *const u8) {
         let (raw, next) = unsafe { <u32 as Operand>::decode_from_ptr(width, input) };
         #[cfg(debug_assertions)]
@@ -339,6 +343,7 @@ impl<T> Operand for *const T {
         true
     }
 
+    #[inline(always)]
     unsafe fn decode_from_ptr(width: OperandWidth, input: *const u8) -> (Self, *const u8) {
         let (value, next) = unsafe { <usize as Operand>::decode_from_ptr(width, input) };
         (value as *const T, next)
@@ -366,6 +371,7 @@ impl<T> Operand for *mut T {
         true
     }
 
+    #[inline(always)]
     unsafe fn decode_from_ptr(width: OperandWidth, input: *const u8) -> (Self, *const u8) {
         let (value, next) = unsafe { <usize as Operand>::decode_from_ptr(width, input) };
         (value as *mut T, next)
@@ -396,6 +402,7 @@ impl<T> Operand for NonNull<T> {
         true
     }
 
+    #[inline(always)]
     unsafe fn decode_from_ptr(width: OperandWidth, input: *const u8) -> (Self, *const u8) {
         let (pointer, next) = unsafe { <usize as Operand>::decode_from_ptr(width, input) };
         let pointer = pointer as *mut T;

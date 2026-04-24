@@ -356,18 +356,48 @@ fn exec_nop(vm: &mut Vm, count: u8) -> Step {
 generated::define_interpreter! {
     fn dispatch_with_pc(code: &CodeBlock, pc: &mut usize, vm: &mut Vm) -> Step;
     ip {
-        load = { code.pc_to_ip(*pc) };
+        load = {
+            if vm.steps == STEP_LIMIT {
+                return Step::Trap(format!("step limit of {STEP_LIMIT} reached"));
+            }
+            if *pc >= code.len() {
+                return Step::Trap("program terminated without Return".to_string());
+            }
+            vm.steps += 1;
+            code.pc_to_ip(*pc)
+        };
         store(next_ip) = { *pc = code.ip_to_pc(next_ip); };
     }
-    invalid(opcode, width) => exec_invalid(vm, opcode, width),
-    LoadConst(op) => exec_load_const(vm, op.dst, op.value),
-    Add(op) => exec_add(vm, op.dst, op.lhs, op.rhs),
-    Sub(op) => exec_sub(vm, op.dst, op.lhs, op.rhs),
-    JumpIfZero(op) => exec_jump_if_zero_pc(code, pc, vm, op),
-    Jump(op) => exec_jump_pc(code, pc, vm, op.target),
-    LoadWide(op) => exec_load_wide(vm, op.dst, op.addr),
-    Nop(op) => exec_nop(vm, op.count),
-    Return(op) => exec_return(vm, op.src),
+    invalid(opcode, width) => return exec_invalid(vm, opcode, width),
+    LoadConst(op) => match exec_load_const(vm, op.dst, op.value) {
+        Step::Continue => {}
+        status => return status,
+    },
+    Add(op) => match exec_add(vm, op.dst, op.lhs, op.rhs) {
+        Step::Continue => {}
+        status => return status,
+    },
+    Sub(op) => match exec_sub(vm, op.dst, op.lhs, op.rhs) {
+        Step::Continue => {}
+        status => return status,
+    },
+    JumpIfZero(op) => match exec_jump_if_zero_pc(code, pc, vm, op) {
+        Step::Continue => {}
+        status => return status,
+    },
+    Jump(op) => match exec_jump_pc(code, pc, vm, op.target) {
+        Step::Continue => {}
+        status => return status,
+    },
+    LoadWide(op) => match exec_load_wide(vm, op.dst, op.addr) {
+        Step::Continue => {}
+        status => return status,
+    },
+    Nop(op) => match exec_nop(vm, op.count) {
+        Step::Continue => {}
+        status => return status,
+    },
+    Return(op) => return exec_return(vm, op.src),
 }
 
 fn prepare_tail_dispatch(code: &mut CodeBlock, ip: *mut u8, vm: &mut Vm) -> Option<Step> {
@@ -507,21 +537,8 @@ fn assemble_program() -> (CodeBlock, String) {
 fn run_with_pc(code: &CodeBlock) -> RunResult {
     let mut pc = 0usize;
     let mut vm = Vm::default();
-
-    loop {
-        if vm.steps == STEP_LIMIT {
-            return vm.finish(Step::Trap(format!("step limit of {STEP_LIMIT} reached")));
-        }
-        if pc >= code.len() {
-            return vm.finish(Step::Trap("program terminated without Return".to_string()));
-        }
-
-        vm.steps += 1;
-        match dispatch_with_pc(code, &mut pc, &mut vm) {
-            Step::Continue => {}
-            status => return vm.finish(status),
-        }
-    }
+    let status = dispatch_with_pc(code, &mut pc, &mut vm);
+    vm.finish(status)
 }
 
 fn run_with_ip(code: &mut CodeBlock) -> RunResult {

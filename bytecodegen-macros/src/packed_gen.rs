@@ -26,7 +26,10 @@ pub(crate) fn generate_packed_items(
 
     let mut operand_layout_bits = std::collections::HashMap::<String, u8>::new();
     for placement in &layout.placements {
-        if let bytecodegen_core::PackedFieldPlacement::Operand { name, bit_width, .. } = placement {
+        if let bytecodegen_core::PackedFieldPlacement::Operand {
+            name, bit_width, ..
+        } = placement
+        {
             *operand_layout_bits.entry(name.clone()).or_insert(0) += bit_width;
         }
     }

@@ -589,4 +589,3 @@ impl Parse for CheckpointDecl {
         })
     }
 }
-

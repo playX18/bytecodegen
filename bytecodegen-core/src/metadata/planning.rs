@@ -104,7 +104,12 @@ pub(crate) fn metadata_offset(bytes: &[u8], opcode: usize, num_opcodes: usize) -
     Some(u32::from_ne_bytes([raw32[0], raw32[1], raw32[2], raw32[3]]))
 }
 
-pub(crate) fn write_metadata_offset(bytes: &mut [u8], opcode: usize, num_opcodes: usize, offset: u32) {
+pub(crate) fn write_metadata_offset(
+    bytes: &mut [u8],
+    opcode: usize,
+    num_opcodes: usize,
+    offset: u32,
+) {
     let offset16_start = opcode * mem::size_of::<u16>();
     let offset16_end = offset16_start + mem::size_of::<u16>();
     if offset != 0 && u16::try_from(offset).is_ok() {
@@ -166,7 +171,12 @@ pub fn plan_metadata_table(
     let mut offset = header_size;
     let mut headers = Vec::with_capacity(types.len());
 
-    for (index, (spec, count)) in types.iter().copied().zip(counts.iter().copied()).enumerate() {
+    for (index, (spec, count)) in types
+        .iter()
+        .copied()
+        .zip(counts.iter().copied())
+        .enumerate()
+    {
         if count == 0 {
             headers.push(MetadataHeaderEntry { offset: 0, len: 0 });
             continue;
@@ -183,7 +193,9 @@ pub fn plan_metadata_table(
         let slot_total = spec
             .size
             .checked_mul(count as usize)
-            .ok_or(LinkError::LayoutOverflow("metadata slot total size overflow"))?;
+            .ok_or(LinkError::LayoutOverflow(
+                "metadata slot total size overflow",
+            ))?;
         offset = offset
             .checked_add(slot_total)
             .ok_or(LinkError::LayoutOverflow("metadata total size overflow"))?;

@@ -43,7 +43,9 @@ pub(crate) fn plan_body_packed_layout(
     }
 }
 
-pub(crate) fn lower_layout_model_to_core_specs(layout: &crate::model::LayoutModel) -> Vec<PackedWordSpec> {
+pub(crate) fn lower_layout_model_to_core_specs(
+    layout: &crate::model::LayoutModel,
+) -> Vec<PackedWordSpec> {
     layout
         .words
         .iter()

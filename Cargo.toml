@@ -14,6 +14,13 @@ members = [".", "bytecodegen-core", "bytecodegen-macros"]
 bytecodegen-core = { path = "bytecodegen-core" }
 bytecodegen-macros = { path = "bytecodegen-macros" }
 
+[dev-dependencies]
+criterion = "0.7"
+
+[[bench]]
+name = "opcode_execution"
+harness = false
+
 [workspace.package]
 edition = "2024"
 version = "0.1.0"
@@ -23,3 +30,6 @@ proc-macro2 = "1.0.103"
 quote = "1.0.41"
 syn = { version = "2.0.108", features = ["full", "parsing", "extra-traits"] }
 bytecodegen-macros = { path = "bytecodegen-macros" }
+
+[profile.bench]
+lto = true

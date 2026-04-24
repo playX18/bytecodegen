@@ -10,4 +10,6 @@ pub use planning::{
     MetadataHeaderEntry, MetadataTableLayout, MetadataTypeSpec, initialize_metadata_table,
     metadata_slot_ptr, plan_metadata_table,
 };
-pub use views::{LinkedBytecodeView, LinkedInstructionEntry, MetadataTableView, MetadataTableViewMut};
+pub use views::{
+    LinkedBytecodeView, LinkedInstructionEntry, MetadataTableView, MetadataTableViewMut,
+};

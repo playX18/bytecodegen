@@ -265,6 +265,7 @@ fn gen_enum_operand(
 
             fn can_decode_from_ptr() -> bool { true }
 
+            #[inline(always)]
             unsafe fn decode_from_ptr(width: #crate_path::OperandWidth, input: *const u8) -> (Self, *const u8) {
                 #const_defs
                 let (val, next) = <#repr as #crate_path::Operand>::decode_from_ptr(width, input);
@@ -439,6 +440,7 @@ fn gen_newtype_operand(
                 <#inner_type as #crate_path::Operand>::can_decode_from_ptr()
             }
 
+            #[inline(always)]
             unsafe fn decode_from_ptr(width: #crate_path::OperandWidth, input: *const u8) -> (Self, *const u8) {
                 let (val, next) = <#inner_type as #crate_path::Operand>::decode_from_ptr(width, input);
                 (Self(val), next)

@@ -1,5 +1,5 @@
-use std::collections::{HashMap, HashSet};
 use proc_macro2::Span;
+use std::collections::{HashMap, HashSet};
 
 use syn::spanned::Spanned;
 use syn::{Error, Ident, Result};
@@ -7,8 +7,8 @@ use syn::{Error, Ident, Result};
 use crate::doc::DocBlock;
 use crate::model::{
     BodyModel, CheckpointModel, DebugModel, EncodingModel, FieldModel, GroupModel, LayoutModel,
-    LayoutSliceModel, LayoutWordModel, NameModel, OpcodeModel, RelocationModel, SchemaModel, SectionModel,
-    SourceItemModel, VerifyKind as VerifyKindModel, VerifyModel,
+    LayoutSliceModel, LayoutWordModel, NameModel, OpcodeModel, RelocationModel, SchemaModel,
+    SectionModel, SourceItemModel, VerifyKind as VerifyKindModel, VerifyModel,
 };
 use crate::parse::{
     BodyDecl, CheckpointDecl, DebugDecl, FieldDecl, GroupDecl, LayoutDecl, OpcodeDecl,
@@ -571,4 +571,3 @@ pub(crate) fn validate_supported_type(ty: &syn::Type) -> Result<()> {
         )),
     }
 }
-

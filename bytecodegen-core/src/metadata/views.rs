@@ -1,7 +1,6 @@
 use std::ptr::NonNull;
 use std::slice;
 
-
 use super::planning::{
     MetadataHeaderEntry, MetadataTypeSpec, debug_assert_metadata_type_matches, metadata_offset,
     metadata_slot_range,

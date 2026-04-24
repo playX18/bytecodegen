@@ -302,6 +302,7 @@ pub(crate) fn generate_opcode_items(
     let emit_error_name = &opcode.name.upper_camel;
     let opcode_enum_ident = &opcode.name.ident;
     let has_relocations = opcode.has_relocations();
+    let is_packed = opcode.packed_layout.is_some();
     let packed_items = generate_packed_items(opcode, crate_path);
     let reloc_variant_ident = format_ident!("__{}Linkable", opcode.name.ident);
     let reloc_input_traits = opcode.body.args.iter().filter_map(|field| {
@@ -686,9 +687,16 @@ pub(crate) fn generate_opcode_items(
     };
 
     let linkable_helpers = if has_relocations {
-        let encoded_len_expr = quote! {
-            #crate_path::core::instruction_header_len(OpcodeId::#opcode_enum_ident as u16, width)
-                #(+ #encode_len_terms)*
+        let encoded_len_expr = if let Some(layout) = opcode.packed_layout.as_ref() {
+            let byte_len = layout.word_count * 4;
+            quote! {
+                #byte_len
+            }
+        } else {
+            quote! {
+                #crate_path::core::instruction_header_len(OpcodeId::#opcode_enum_ident as u16, width)
+                    #(+ #encode_len_terms)*
+            }
         };
 
         let linkable_ctor = if opcode.body.metadata.is_empty() {
@@ -780,6 +788,131 @@ pub(crate) fn generate_opcode_items(
         quote!()
     };
 
+    let encode_impl = if is_packed {
+        quote! {
+            impl #crate_path::core::Encode for #opcode_ident {
+                fn encoded_len(&self, _width: #crate_path::core::OperandWidth) -> usize {
+                    <#opcode_ident as #crate_path::core::PackedEmit>::packed_word_len(self) * 4
+                }
+
+                fn encode_with_width<S: #crate_path::core::ByteSink + ?Sized>(
+                    &self,
+                    output: &mut S,
+                    _width: #crate_path::core::OperandWidth,
+                ) {
+                    let words = <#opcode_ident as #crate_path::core::PackedEncode>::encode_packed_to_words(self)
+                        .expect("packed instruction failed width check");
+                    for word in words {
+                        output.extend_from_slice(&word.to_le_bytes());
+                    }
+                }
+            }
+        }
+    } else {
+        quote! {
+            impl #crate_path::core::Encode for #opcode_ident {
+                fn encoded_len(&self, width: #crate_path::core::OperandWidth) -> usize {
+                    #crate_path::core::instruction_header_len(OpcodeId::#opcode_enum_ident as u16, width)
+                        #(+ #encode_len_terms)*
+                }
+
+                fn encode_with_width<S: #crate_path::core::ByteSink + ?Sized>(
+                    &self,
+                    output: &mut S,
+                    width: #crate_path::core::OperandWidth,
+                ) {
+                    let opcode = OpcodeId::#opcode_enum_ident as u16;
+                    assert!(
+                        #crate_path::core::instruction_opcode_fits_width(opcode, width),
+                        "opcode {} does not fit in {:?} instruction header",
+                        stringify!(#opcode_ident),
+                        width
+                    );
+                    #crate_path::core::encode_instruction_header(output, opcode, width);
+                    #(#encode_args)*
+                }
+            }
+        }
+    };
+
+    let emit_impl = if is_packed {
+        quote! {
+            impl #crate_path::core::Emit for #opcode_ident {
+                fn check_width(&self, _width: #crate_path::core::OperandWidth) -> bool {
+                    <#opcode_ident as #crate_path::core::PackedEncode>::encode_packed_to_words(self).is_ok()
+                }
+
+                fn emit_with_width<S: #crate_path::core::ByteSink + ?Sized>(
+                    &self,
+                    output: &mut S,
+                    width: #crate_path::core::OperandWidth,
+                ) -> Result<(), #crate_path::core::EmitError> {
+                    if !<#opcode_ident as #crate_path::core::Emit>::check_width(self, width) {
+                        return Err(#crate_path::core::EmitError::WidthDoesNotFit {
+                            opcode: #emit_error_name,
+                            width,
+                        });
+                    }
+
+                    <#opcode_ident as #crate_path::core::Encode>::encode_with_width(self, output, width);
+                    Ok(())
+                }
+
+                fn smallest_width(&self) -> Result<#crate_path::core::OperandWidth, #crate_path::core::EmitError> {
+                    if <#opcode_ident as #crate_path::core::Emit>::check_width(
+                        self,
+                        #crate_path::core::OperandWidth::Narrow,
+                    ) {
+                        Ok(#crate_path::core::OperandWidth::Narrow)
+                    } else {
+                        Err(#crate_path::core::EmitError::WidthDoesNotFit {
+                            opcode: #emit_error_name,
+                            width: #crate_path::core::OperandWidth::Wide32,
+                        })
+                    }
+                }
+            }
+        }
+    } else {
+        quote! {
+            impl #crate_path::core::Emit for #opcode_ident {
+                fn check_width(&self, width: #crate_path::core::OperandWidth) -> bool {
+                    #crate_path::core::instruction_opcode_fits_width(OpcodeId::#opcode_enum_ident as u16, width)
+                        #(&& #check_args)*
+                }
+
+                fn emit_with_width<S: #crate_path::core::ByteSink + ?Sized>(
+                    &self,
+                    output: &mut S,
+                    width: #crate_path::core::OperandWidth,
+                ) -> Result<(), #crate_path::core::EmitError> {
+                    if !<#opcode_ident as #crate_path::core::Emit>::check_width(self, width) {
+                        return Err(#crate_path::core::EmitError::WidthDoesNotFit {
+                            opcode: #emit_error_name,
+                            width,
+                        });
+                    }
+
+                    <#opcode_ident as #crate_path::core::Encode>::encode_with_width(self, output, width);
+                    Ok(())
+                }
+
+                fn smallest_width(&self) -> Result<#crate_path::core::OperandWidth, #crate_path::core::EmitError> {
+                    for width in #crate_path::core::OperandWidth::in_preference_order() {
+                        if <#opcode_ident as #crate_path::core::Emit>::check_width(self, width) {
+                            return Ok(width);
+                        }
+                    }
+
+                    Err(#crate_path::core::EmitError::WidthDoesNotFit {
+                        opcode: #emit_error_name,
+                        width: #crate_path::core::OperandWidth::Wide32,
+                    })
+                }
+            }
+        }
+    };
+
     quote! {
         #(#reloc_input_traits)*
         #metadata_struct
@@ -821,28 +954,7 @@ pub(crate) fn generate_opcode_items(
             type Metadata = #metadata_type;
         }
 
-        impl #crate_path::core::Encode for #opcode_ident {
-            fn encoded_len(&self, width: #crate_path::core::OperandWidth) -> usize {
-                #crate_path::core::instruction_header_len(OpcodeId::#opcode_enum_ident as u16, width)
-                    #(+ #encode_len_terms)*
-            }
-
-            fn encode_with_width<S: #crate_path::core::ByteSink + ?Sized>(
-                &self,
-                output: &mut S,
-                width: #crate_path::core::OperandWidth,
-            ) {
-                let opcode = OpcodeId::#opcode_enum_ident as u16;
-                assert!(
-                    #crate_path::core::instruction_opcode_fits_width(opcode, width),
-                    "opcode {} does not fit in {:?} instruction header",
-                    stringify!(#opcode_ident),
-                    width
-                );
-                #crate_path::core::encode_instruction_header(output, opcode, width);
-                #(#encode_args)*
-            }
-        }
+        #encode_impl
 
         impl #crate_path::core::Decode for #opcode_ident {
             fn decode_body(
@@ -856,41 +968,7 @@ pub(crate) fn generate_opcode_items(
             }
         }
 
-        impl #crate_path::core::Emit for #opcode_ident {
-            fn check_width(&self, width: #crate_path::core::OperandWidth) -> bool {
-                #crate_path::core::instruction_opcode_fits_width(OpcodeId::#opcode_enum_ident as u16, width)
-                    #(&& #check_args)*
-            }
-
-            fn emit_with_width<S: #crate_path::core::ByteSink + ?Sized>(
-                &self,
-                output: &mut S,
-                width: #crate_path::core::OperandWidth,
-            ) -> Result<(), #crate_path::core::EmitError> {
-                if !<#opcode_ident as #crate_path::core::Emit>::check_width(self, width) {
-                    return Err(#crate_path::core::EmitError::WidthDoesNotFit {
-                        opcode: #emit_error_name,
-                        width,
-                    });
-                }
-
-                <#opcode_ident as #crate_path::core::Encode>::encode_with_width(self, output, width);
-                Ok(())
-            }
-
-            fn smallest_width(&self) -> Result<#crate_path::core::OperandWidth, #crate_path::core::EmitError> {
-                for width in #crate_path::core::OperandWidth::in_preference_order() {
-                    if <#opcode_ident as #crate_path::core::Emit>::check_width(self, width) {
-                        return Ok(width);
-                    }
-                }
-
-                Err(#crate_path::core::EmitError::WidthDoesNotFit {
-                    opcode: #emit_error_name,
-                    width: #crate_path::core::OperandWidth::Wide32,
-                })
-            }
-        }
+        #emit_impl
 
         impl<Ctx, Formatter> #crate_path::core::Disassemble<Ctx, Formatter> for #opcode_ident
         where

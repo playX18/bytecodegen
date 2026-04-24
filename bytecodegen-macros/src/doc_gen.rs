@@ -356,7 +356,7 @@ pub(crate) fn section_doc_lines(section: &SectionModel) -> Vec<String> {
 
 pub(crate) fn define_interpreter_doc_lines() -> Vec<String> {
     vec![
-        "Generates a decoder/dispatcher function for the current schema.".to_string(),
+        "Generates a loop-based decoder/dispatcher function for the current schema.".to_string(),
         String::new(),
         "The macro input contains:".to_string(),
         "1. A free function signature.".to_string(),
@@ -364,7 +364,7 @@ pub(crate) fn define_interpreter_doc_lines() -> Vec<String> {
         "3. An `invalid(opcode, width)` arm for unknown opcode values.".to_string(),
         "4. One `Opcode(binding) => expr` arm per schema opcode, in schema order.".to_string(),
         String::new(),
-        "The generated function decodes one instruction, runs the matching handler expression, and returns that expression's value. The `store(next_ip)` hook runs after decoding succeeds and before the opcode handler is evaluated.".to_string(),
+        "The generated function owns the interpreter loop. On each iteration it evaluates `load`, decodes one instruction, evaluates `store(next_ip)`, then runs the selected opcode handler inline as a statement. Handler bodies can update interpreter state directly and use normal control flow such as `return`, `break`, or `continue`.".to_string(),
         String::new(),
         "## Example".to_string(),
         String::new(),
@@ -373,6 +373,9 @@ pub(crate) fn define_interpreter_doc_lines() -> Vec<String> {
         String::new(),
         "bytecode_list! {".to_string(),
         "    section Bytecode {".to_string(),
+        "        Noop {".to_string(),
+        "            args {}".to_string(),
+        "        }".to_string(),
         "        Return {".to_string(),
         "            args {".to_string(),
         "                value: i32,".to_string(),
@@ -389,7 +392,8 @@ pub(crate) fn define_interpreter_doc_lines() -> Vec<String> {
         "    }".to_string(),
         "    invalid(opcode, width) => panic!(\"invalid opcode {opcode} at {width:?}\"),"
             .to_string(),
-        "    Return(op) => op.value,".to_string(),
+        "    Noop(_op) => {},".to_string(),
+        "    Return(op) => return op.value,".to_string(),
         "}".to_string(),
         String::new(),
         "let (_, bytes) = Return::new(42).emit_smallest_to_vec().unwrap();".to_string(),

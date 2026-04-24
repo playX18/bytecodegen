@@ -5,7 +5,9 @@ use std::slice;
 use crate::error::LinkError;
 
 use super::planning::{MetadataTypeSpec, debug_assert_metadata_type_matches, metadata_slot_range};
-use super::views::{LinkedBytecodeView, LinkedInstructionEntry, MetadataTableView, MetadataTableViewMut};
+use super::views::{
+    LinkedBytecodeView, LinkedInstructionEntry, MetadataTableView, MetadataTableViewMut,
+};
 
 /// Metadata needed by a [`LinkBackendV2`] to finalize its artifact.
 #[derive(Debug, Clone)]

@@ -1320,6 +1320,26 @@ pub(crate) fn generate_schema(schema: &SchemaModel, crate_path: &TokenStream2) -
         },
         EncodingModel::Bytes => quote!(),
     };
+    let decode_linked_record_body = match schema.encoding {
+        EncodingModel::Packed { .. } => quote! {
+            let words = #crate_path::core::packed_bytes_to_words(bytes)?;
+            let packed = Instruction::decode_packed_record(&words)?;
+            Ok(DecodedInstruction {
+                instruction: packed.instruction,
+                width: #crate_path::core::OperandWidth::Wide32,
+                offset: start,
+                size: end - start,
+                raw_bytes: bytes.to_vec().into_boxed_slice(),
+            })
+        },
+        EncodingModel::Bytes => quote! {
+            let mut cursor = #crate_path::core::ByteCursor::new(bytes);
+            let mut decoded = Instruction::decode_record_from(&mut cursor)?;
+            decoded.offset = start;
+            decoded.size = end - start;
+            Ok(decoded)
+        },
+    };
     let interpreter_macro_items =
         generate_interpreter_macro_items(schema, crate_path, &macro_suffix);
 
@@ -2134,11 +2154,7 @@ pub(crate) fn generate_schema(schema: &SchemaModel, crate_path: &TokenStream2) -
                     .bytes()
                     .get(start..end)
                     .ok_or(#crate_path::core::DecodeError::UnexpectedEof)?;
-                let mut cursor = #crate_path::core::ByteCursor::new(bytes);
-                let mut decoded = Instruction::decode_record_from(&mut cursor)?;
-                decoded.offset = start;
-                decoded.size = end - start;
-                Ok(decoded)
+                #decode_linked_record_body
             }
 
             pub fn disassemble_bytes_with<Ctx, Formatter>(
