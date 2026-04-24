@@ -8,9 +8,9 @@ See [bytecodegen-core](./bytecodegen-core) for the runtime pieces and [bytecodeg
 
 ## Why use this?
 
-Defining a non-trivial bytecode format usually means writing the same logic several times: instruction structs, encoders, decoders, relocations, disassembly, metadata plumbing, and interpreter dispatch glue. That code is repetitive, easy to get wrong, and awkward to evolve.
+Defining a non-trivial bytecode format usually means writing the same logic several times: instruction structs, encoders, decoders, relocations, disassembly, metadata plumbing, and interpreter dispatch glue. That code is repetitive, easy to get wrong, and hard to maintain.
 
-`bytecodegen` moves that work into the DSL. You describe opcodes, operands, relocations, and per-opcode metadata once, and the crate generates the typed surface area around it. The result is less boilerplate and a format that is easier to inspect, test, and change.
+`bytecodegen` moves that work into the DSL. You describe opcodes, operands, relocations, and per-opcode metadata once, and the crate generates the typed surface area around it. The result is less boilerplate and a format that is easier to inspect, test, and update.
 
 ## Encoding model
 
@@ -83,7 +83,7 @@ Packed schemas generate extra helpers on each opcode type and on the section `In
 
 Use word helpers when your runtime naturally stores records as `u32` words, and use the byte helpers when you need a serialized little-endian representation.
 
-Packed optional operands currently use an all-zero sentinel for `None`. That keeps encoding simple, but it also means optional packed fields reserve the zero/default representation rather than treating it as an ordinary payload value.
+Packed optional operands currently use an all-zero sentinel for `None`. 
 
 ## Linking and metadata
 
