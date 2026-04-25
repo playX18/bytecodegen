@@ -81,6 +81,7 @@ pub(crate) fn generate_interpreter_rules(
     let meta_var = format_ident!("__meta");
     let vis_var = format_ident!("__vis");
     let name_var = format_ident!("__name");
+    let lifetime_var = format_ident!("__lifetime");
     let param_var = format_ident!("__param");
     let param_ty_var = format_ident!("__param_ty");
     let abi_var = format_ident!("__abi");
@@ -92,9 +93,20 @@ pub(crate) fn generate_interpreter_rules(
     let invalid_opcode_binding_var = format_ident!("__invalid_opcode_binding");
     let invalid_width_binding_var = format_ident!("__invalid_width_binding");
     let invalid_expr_var = format_ident!("__invalid_expr");
-    let unit_runtime = generate_interpreter_runtime(schema, crate_path, flavor, &quote!(()));
-    let return_runtime =
-        generate_interpreter_runtime(schema, crate_path, flavor, &quote!($#ret_var));
+    let unit_runtime = generate_interpreter_runtime(
+        schema,
+        crate_path,
+        flavor,
+        &quote!(()),
+        &quote!(#lifetime_var),
+    );
+    let return_runtime = generate_interpreter_runtime(
+        schema,
+        crate_path,
+        flavor,
+        &quote!($#ret_var),
+        &quote!(#lifetime_var),
+    );
 
     let arms_pattern = generate_interpreter_arm_pattern(
         schema,
@@ -106,7 +118,7 @@ pub(crate) fn generate_interpreter_rules(
     let safe_no_return = quote! {
         (
             $(#[$#meta_var:meta])*
-            $#vis_var:vis fn $#name_var:ident($( $#param_var:ident : $#param_ty_var:ty ),* $(,)?);
+            $#vis_var:vis fn $#name_var:ident$(<$($#lifetime_var:lifetime),*>)?($( $#param_var:ident : $#param_ty_var:ty ),* $(,)?);
             ip {
                 load = $#load_var:block;
                 store($#next_ip_binding_var:ident) = $#store_var:block;
@@ -115,7 +127,7 @@ pub(crate) fn generate_interpreter_rules(
         ) => {
             #[allow(unused_variables)]
             $(#[$#meta_var])*
-            $#vis_var fn $#name_var($( $#param_var : $#param_ty_var ),*) {
+            $#vis_var fn $#name_var$(<$($#lifetime_var),*>)?($( $#param_var : $#param_ty_var ),*) {
                 #unit_runtime
             }
         };
@@ -124,7 +136,7 @@ pub(crate) fn generate_interpreter_rules(
     let safe_with_return = quote! {
         (
             $(#[$#meta_var:meta])*
-            $#vis_var:vis fn $#name_var:ident($( $#param_var:ident : $#param_ty_var:ty ),* $(,)?)
+            $#vis_var:vis fn $#name_var:ident$(<$($#lifetime_var:lifetime),*>)?($( $#param_var:ident : $#param_ty_var:ty ),* $(,)?)
                 -> $#ret_var:ty;
             ip {
                 load = $#load_var:block;
@@ -134,7 +146,7 @@ pub(crate) fn generate_interpreter_rules(
         ) => {
             #[allow(unused_variables)]
             $(#[$#meta_var])*
-            $#vis_var fn $#name_var($( $#param_var : $#param_ty_var ),*) -> $#ret_var {
+            $#vis_var fn $#name_var$(<$($#lifetime_var),*>)?($( $#param_var : $#param_ty_var ),*) -> $#ret_var {
                 #return_runtime
             }
         };
@@ -143,7 +155,7 @@ pub(crate) fn generate_interpreter_rules(
     let unsafe_no_return = quote! {
         (
             $(#[$#meta_var:meta])*
-            $#vis_var:vis unsafe fn $#name_var:ident($( $#param_var:ident : $#param_ty_var:ty ),* $(,)?);
+            $#vis_var:vis unsafe fn $#name_var:ident$(<$($#lifetime_var:lifetime),*>)?($( $#param_var:ident : $#param_ty_var:ty ),* $(,)?);
             ip {
                 load = $#load_var:block;
                 store($#next_ip_binding_var:ident) = $#store_var:block;
@@ -152,7 +164,7 @@ pub(crate) fn generate_interpreter_rules(
         ) => {
             #[allow(unused_variables)]
             $(#[$#meta_var])*
-            $#vis_var unsafe fn $#name_var($( $#param_var : $#param_ty_var ),*) {
+            $#vis_var unsafe fn $#name_var$(<$($#lifetime_var),*>)?($( $#param_var : $#param_ty_var ),*) {
                 #unit_runtime
             }
         };
@@ -161,7 +173,7 @@ pub(crate) fn generate_interpreter_rules(
     let unsafe_with_return = quote! {
         (
             $(#[$#meta_var:meta])*
-            $#vis_var:vis unsafe fn $#name_var:ident($( $#param_var:ident : $#param_ty_var:ty ),* $(,)?)
+            $#vis_var:vis unsafe fn $#name_var:ident$(<$($#lifetime_var:lifetime),*>)?($( $#param_var:ident : $#param_ty_var:ty ),* $(,)?)
                 -> $#ret_var:ty;
             ip {
                 load = $#load_var:block;
@@ -171,7 +183,7 @@ pub(crate) fn generate_interpreter_rules(
         ) => {
             #[allow(unused_variables)]
             $(#[$#meta_var])*
-            $#vis_var unsafe fn $#name_var($( $#param_var : $#param_ty_var ),*) -> $#ret_var {
+            $#vis_var unsafe fn $#name_var$(<$($#lifetime_var),*>)?($( $#param_var : $#param_ty_var ),*) -> $#ret_var {
                 #return_runtime
             }
         };
@@ -180,7 +192,7 @@ pub(crate) fn generate_interpreter_rules(
     let extern_no_return = quote! {
         (
             $(#[$#meta_var:meta])*
-            $#vis_var:vis extern $#abi_var:literal fn $#name_var:ident($( $#param_var:ident : $#param_ty_var:ty ),* $(,)?);
+            $#vis_var:vis extern $#abi_var:literal fn $#name_var:ident$(<$($#lifetime_var:lifetime),*>)?($( $#param_var:ident : $#param_ty_var:ty ),* $(,)?);
             ip {
                 load = $#load_var:block;
                 store($#next_ip_binding_var:ident) = $#store_var:block;
@@ -189,7 +201,7 @@ pub(crate) fn generate_interpreter_rules(
         ) => {
             #[allow(unused_variables)]
             $(#[$#meta_var])*
-            $#vis_var extern $#abi_var fn $#name_var($( $#param_var : $#param_ty_var ),*) {
+            $#vis_var extern $#abi_var fn $#name_var$(<$($#lifetime_var),*>)?($( $#param_var : $#param_ty_var ),*) {
                 #unit_runtime
             }
         };
@@ -198,7 +210,7 @@ pub(crate) fn generate_interpreter_rules(
     let extern_with_return = quote! {
         (
             $(#[$#meta_var:meta])*
-            $#vis_var:vis extern $#abi_var:literal fn $#name_var:ident($( $#param_var:ident : $#param_ty_var:ty ),* $(,)?)
+            $#vis_var:vis extern $#abi_var:literal fn $#name_var:ident$(<$($#lifetime_var:lifetime),*>)?($( $#param_var:ident : $#param_ty_var:ty ),* $(,)?)
                 -> $#ret_var:ty;
             ip {
                 load = $#load_var:block;
@@ -208,7 +220,7 @@ pub(crate) fn generate_interpreter_rules(
         ) => {
             #[allow(unused_variables)]
             $(#[$#meta_var])*
-            $#vis_var extern $#abi_var fn $#name_var($( $#param_var : $#param_ty_var ),*) -> $#ret_var {
+            $#vis_var extern $#abi_var fn $#name_var$(<$($#lifetime_var),*>)?($( $#param_var : $#param_ty_var ),*) -> $#ret_var {
                 #return_runtime
             }
         };
@@ -217,7 +229,7 @@ pub(crate) fn generate_interpreter_rules(
     let unsafe_extern_no_return = quote! {
         (
             $(#[$#meta_var:meta])*
-            $#vis_var:vis unsafe extern $#abi_var:literal fn $#name_var:ident($( $#param_var:ident : $#param_ty_var:ty ),* $(,)?);
+            $#vis_var:vis unsafe extern $#abi_var:literal fn $#name_var:ident$(<$($#lifetime_var:lifetime),*>)?($( $#param_var:ident : $#param_ty_var:ty ),* $(,)?);
             ip {
                 load = $#load_var:block;
                 store($#next_ip_binding_var:ident) = $#store_var:block;
@@ -226,7 +238,7 @@ pub(crate) fn generate_interpreter_rules(
         ) => {
             #[allow(unused_variables)]
             $(#[$#meta_var])*
-            $#vis_var unsafe extern $#abi_var fn $#name_var($( $#param_var : $#param_ty_var ),*) {
+            $#vis_var unsafe extern $#abi_var fn $#name_var$(<$($#lifetime_var),*>)?($( $#param_var : $#param_ty_var ),*) {
                 #unit_runtime
             }
         };
@@ -235,7 +247,7 @@ pub(crate) fn generate_interpreter_rules(
     let unsafe_extern_with_return = quote! {
         (
             $(#[$#meta_var:meta])*
-            $#vis_var:vis unsafe extern $#abi_var:literal fn $#name_var:ident($( $#param_var:ident : $#param_ty_var:ty ),* $(,)?)
+            $#vis_var:vis unsafe extern $#abi_var:literal fn $#name_var:ident$(<$($#lifetime_var:lifetime),*>)?($( $#param_var:ident : $#param_ty_var:ty ),* $(,)?)
                 -> $#ret_var:ty;
             ip {
                 load = $#load_var:block;
@@ -245,7 +257,7 @@ pub(crate) fn generate_interpreter_rules(
         ) => {
             #[allow(unused_variables)]
             $(#[$#meta_var])*
-            $#vis_var unsafe extern $#abi_var fn $#name_var($( $#param_var : $#param_ty_var ),*) -> $#ret_var {
+            $#vis_var unsafe extern $#abi_var fn $#name_var$(<$($#lifetime_var),*>)?($( $#param_var : $#param_ty_var ),*) -> $#ret_var {
                 #return_runtime
             }
         };
@@ -288,19 +300,20 @@ pub(crate) fn generate_interpreter_runtime(
     crate_path: &TokenStream2,
     flavor: InterpreterMacroFlavor,
     ret_ty: &TokenStream2,
+    lifetime_var: &TokenStream2,
 ) -> TokenStream2 {
     match (schema.encoding, flavor) {
         (EncodingModel::Bytes, InterpreterMacroFlavor::Expression) => {
             generate_expression_interpreter_runtime(schema, crate_path, ret_ty)
         }
         (EncodingModel::Bytes, InterpreterMacroFlavor::TailPath) => {
-            generate_tail_interpreter_runtime(schema, crate_path, ret_ty)
+            generate_tail_interpreter_runtime(schema, crate_path, ret_ty, lifetime_var)
         }
         (EncodingModel::Packed { .. }, InterpreterMacroFlavor::Expression) => {
             generate_packed_expression_interpreter_runtime(schema, crate_path, ret_ty)
         }
         (EncodingModel::Packed { .. }, InterpreterMacroFlavor::TailPath) => {
-            generate_packed_tail_interpreter_runtime(schema, crate_path, ret_ty)
+            generate_packed_tail_interpreter_runtime(schema, crate_path, ret_ty, lifetime_var)
         }
     }
 }
@@ -622,6 +635,7 @@ pub(crate) fn generate_tail_interpreter_runtime(
     schema: &SchemaModel,
     crate_path: &TokenStream2,
     ret_ty: &TokenStream2,
+    lifetime_var: &TokenStream2,
 ) -> TokenStream2 {
     let load_var = format_ident!("__load");
     let invalid_opcode_binding_var = format_ident!("__invalid_opcode_binding");
@@ -635,7 +649,7 @@ pub(crate) fn generate_tail_interpreter_runtime(
         .iter()
         .enumerate()
         .map(|(index, opcode)| {
-            generate_tail_interpreter_dispatch_fns(opcode, index, crate_path, ret_ty)
+            generate_tail_interpreter_dispatch_fns(opcode, index, crate_path, ret_ty, lifetime_var)
         })
         .collect::<Vec<_>>();
 
@@ -699,11 +713,11 @@ pub(crate) fn generate_tail_interpreter_runtime(
     );
 
     quote! {
-        type __DispatchFn = fn($( $#param_ty_var, )*) -> #ret_ty;
+        type __DispatchFn = $(for<$($#lifetime_var),*>)? fn($( $#param_ty_var, )*) -> #ret_ty;
 
         #[allow(unused_variables)]
         #[inline(always)]
-        fn __invalid_narrow($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
+        fn __invalid_narrow$(<$($#lifetime_var),*>)?($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
             let __instruction_ptr = ($#load_var) as *const u8;
             let (__opcode, _) = unsafe {
                 <u8 as #crate_path::core::Operand>::decode_from_ptr(
@@ -716,7 +730,7 @@ pub(crate) fn generate_tail_interpreter_runtime(
 
         #[allow(unused_variables)]
         #[inline(always)]
-        fn __invalid_wide16($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
+        fn __invalid_wide16$(<$($#lifetime_var),*>)?($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
             let __instruction_ptr = ($#load_var) as *const u8;
             let __opcode_ptr = unsafe { __instruction_ptr.add(1) };
             let (__opcode, _) = unsafe {
@@ -730,7 +744,7 @@ pub(crate) fn generate_tail_interpreter_runtime(
 
         #[allow(unused_variables)]
         #[inline(always)]
-        fn __invalid_wide32($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
+        fn __invalid_wide32$(<$($#lifetime_var),*>)?($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
             let __instruction_ptr = ($#load_var) as *const u8;
             let __opcode_ptr = unsafe { __instruction_ptr.add(1) };
             let (__opcode, _) = unsafe {
@@ -744,7 +758,7 @@ pub(crate) fn generate_tail_interpreter_runtime(
 
         #[allow(unused_variables)]
         #[inline(always)]
-        fn __dispatch($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
+        fn __dispatch$(<$($#lifetime_var),*>)?($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
             let __instruction_ptr = ($#load_var) as *const u8;
             unsafe {
                 let __opcode_prefix = __instruction_ptr.read();
@@ -755,7 +769,7 @@ pub(crate) fn generate_tail_interpreter_runtime(
 
         #[allow(unused_variables)]
         #[inline(always)]
-        fn __dispatch_wide16($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
+        fn __dispatch_wide16$(<$($#lifetime_var),*>)?($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
             let __instruction_ptr = ($#load_var) as *const u8;
             unsafe {
                 let __opcode_ptr =  __instruction_ptr.add(1);
@@ -767,18 +781,18 @@ pub(crate) fn generate_tail_interpreter_runtime(
 
         #[allow(unused_variables)]
         #[inline(always)]
-        fn __dispatch_wide32($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
+        fn __dispatch_wide32$(<$($#lifetime_var),*>)?($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
             let __instruction_ptr = ($#load_var) as *const u8;
             unsafe {
                 let __opcode_ptr =  __instruction_ptr.add(1);
                 let __opcode = __opcode_ptr.cast::<u32>().read_unaligned();
                 let __opcode_index = __opcode as usize;
-            
+
                 debug_assert!(__opcode_index < __DISPATCH_TABLE_WIDE16.len());
                 let __entry = *__DISPATCH_TABLE_WIDE32.get_unchecked(__opcode_index);
-                
+
                 become __entry($( $#param_var, )*)
-            
+
             }
         }
 
@@ -831,6 +845,7 @@ pub(crate) fn generate_tail_interpreter_dispatch_fns(
     _opcode_value: usize,
     crate_path: &TokenStream2,
     ret_ty: &TokenStream2,
+    lifetime_var: &TokenStream2,
 ) -> TokenStream2 {
     let opcode_ident = &opcode.name.ident;
     let binding_ident = format_ident!("__{}_binding", opcode.name.snake_case);
@@ -922,7 +937,7 @@ pub(crate) fn generate_tail_interpreter_dispatch_fns(
         quote! {
             #[allow(unused_variables, unused_mut, unused_assignments)]
             #[inline(always)]
-            fn #dispatch_ident($( mut $#param_var: $#param_ty_var, )*) -> #ret_ty {
+            fn #dispatch_ident$(<$($#lifetime_var),*>)?($( mut $#param_var: $#param_ty_var, )*) -> #ret_ty {
                 let __instruction_ptr = ($#load_var) as *const u8;
                 let __width = #width_expr;
                 let __ip = unsafe { __instruction_ptr.add(#header_len) };
@@ -942,6 +957,7 @@ pub(crate) fn generate_packed_tail_interpreter_runtime(
     schema: &SchemaModel,
     crate_path: &TokenStream2,
     ret_ty: &TokenStream2,
+    lifetime_var: &TokenStream2,
 ) -> TokenStream2 {
     let load_var = format_ident!("__load");
     let invalid_opcode_binding_var = format_ident!("__invalid_opcode_binding");
@@ -980,11 +996,11 @@ pub(crate) fn generate_packed_tail_interpreter_runtime(
     );
 
     quote! {
-        type __DispatchFn = fn($( $#param_ty_var, )*) -> #ret_ty;
+        type __DispatchFn = $(for<$($#lifetime_var),*>)? fn($( $#param_ty_var, )*) -> #ret_ty;
 
         #[allow(unused_variables)]
         #[inline(always)]
-        fn __invalid_packed($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
+        fn __invalid_packed$(<$($#lifetime_var),*>)?($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
             let __instruction_ptr = ($#load_var) as *const u8;
             let __first_word = unsafe { __instruction_ptr.cast::<u32>().read_unaligned() };
             let __opcode = #crate_path::core::extract_packed_bits(__first_word, 0, 8);
@@ -993,7 +1009,7 @@ pub(crate) fn generate_packed_tail_interpreter_runtime(
 
         #[allow(unused_variables)]
         #[inline(always)]
-        fn __dispatch($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
+        fn __dispatch$(<$($#lifetime_var),*>)?($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
             let __instruction_ptr = ($#load_var) as *const u8;
             unsafe {
                 let __first_word = __instruction_ptr.cast::<u32>().read_unaligned();
