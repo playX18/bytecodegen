@@ -359,7 +359,7 @@ pub(crate) fn define_interpreter_doc_lines() -> Vec<String> {
         "Generates a loop-based decoder/dispatcher function for the current schema.".to_string(),
         String::new(),
         "The macro input contains:".to_string(),
-        "1. A free function signature.".to_string(),
+        "1. A free function signature, optionally with lifetime parameters (`fn name<'a, 'b>(...)`).".to_string(),
         "2. An `ip` block with `load` and `store(next_ip)` hooks that translate between your instruction cursor and raw pointers.".to_string(),
         "3. An `invalid(opcode, width)` arm for unknown opcode values.".to_string(),
         "4. One `Opcode(binding) => expr` arm per schema opcode, in schema order.".to_string(),
