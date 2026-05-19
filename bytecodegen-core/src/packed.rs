@@ -428,7 +428,7 @@ fn plan_explicit_packed_layout(
     for operand in operands {
         let actual = seen_bits.get(&operand.name).copied().unwrap_or_default();
         let expected = operand.bit_width as usize;
-        if actual > expected {
+        if actual == 0 {
             return Err(PackedLayoutError::OperandCoverageMismatch {
                 name: operand.name.clone(),
                 actual_bits: actual,
@@ -753,3 +753,31 @@ impl PackedOperand for bool {
 }
 
 impl_packed_optional_zero_sentinel!(bool, u8, u16, u32, usize, i8, i16, i32, isize);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_layout_rejects_omitted_operand_bits() {
+        let error = plan_packed_layout(
+            "Jump",
+            32,
+            &[PackedOperandSpec::required("target", 16)],
+            Some(&[PackedWordSpec::new(&[
+                PackedFieldRef::opcode(8),
+                PackedFieldRef::padding(24),
+            ])]),
+        )
+        .expect_err("explicit layout should reject omitted operands");
+
+        assert!(matches!(
+            error,
+            PackedLayoutError::OperandCoverageMismatch {
+                name,
+                actual_bits: 0,
+                expected_bits: 16,
+            } if name == "target"
+        ));
+    }
+}

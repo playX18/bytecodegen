@@ -6,7 +6,7 @@ use bytecodegen::{Label, LinkedBytecodeView, OperandWidth, bytecode_list};
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
 const REGISTER_COUNT: usize = 4;
-const LOOP_COUNT: i32 = i16::MAX as i32 - 1;
+const LOOP_COUNT: i32 = 1024 * 1024;
 
 bytecode_list! {
     section Benchcode {
@@ -211,8 +211,8 @@ enum EnumOpcode {
     LoadConst { dst: u8, value: i32 },
     Add { dst: u8, lhs: u8, rhs: u8 },
     Sub { dst: u8, lhs: u8, rhs: u8 },
-    JumpIfZero { reg: u8, target: isize },
-    Jump { target: isize },
+    JumpIfZero { reg: u8, target: i32 },
+    Jump { target: i32 },
     Return { src: u8 },
 }
 
@@ -427,11 +427,11 @@ fn run_enum(program: &[EnumOpcode]) -> i32 {
             }
             EnumOpcode::JumpIfZero { reg, target } => {
                 if read_register(&registers, reg) == 0 {
-                    pc = branch_target(pc, target, program.len());
+                    pc = branch_target(pc, target as _, program.len());
                 }
             }
             EnumOpcode::Jump { target } => {
-                pc = branch_target(pc, target, program.len());
+                pc = branch_target(pc, target as _, program.len());
             }
             EnumOpcode::Return { src } => return read_register(&registers, src),
         }

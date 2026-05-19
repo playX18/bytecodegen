@@ -625,11 +625,13 @@ pub(crate) fn generate_tail_interpreter_runtime(
     ret_ty: &TokenStream2,
 ) -> TokenStream2 {
     let load_var = format_ident!("__load");
+    let lt_var = format_ident!("__lt");
     let invalid_opcode_binding_var = format_ident!("__invalid_opcode_binding");
     let invalid_width_binding_var = format_ident!("__invalid_width_binding");
     let invalid_expr_var = format_ident!("__invalid_expr");
     let param_var = format_ident!("__param");
     let param_ty_var = format_ident!("__param_ty");
+    let wide_table_len = schema.opcodes.len();
 
     let per_opcode_dispatch_fns = schema
         .opcodes
@@ -700,11 +702,11 @@ pub(crate) fn generate_tail_interpreter_runtime(
     );
 
     quote! {
-        type __DispatchFn = fn($( $#param_ty_var, )*) -> #ret_ty;
+        type __DispatchFn = $(for<$( $#lt_var ),+>)? fn($( $#param_ty_var, )*) -> #ret_ty;
 
         #[allow(unused_variables)]
         #[inline(always)]
-        fn __invalid_narrow($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
+        fn __invalid_narrow $(< $( $#lt_var ),+ >)? ($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
             let __instruction_ptr = ($#load_var) as *const u8;
             let (__opcode, _) = unsafe {
                 <u8 as #crate_path::core::Operand>::decode_from_ptr(
@@ -717,7 +719,7 @@ pub(crate) fn generate_tail_interpreter_runtime(
 
         #[allow(unused_variables)]
         #[inline(always)]
-        fn __invalid_wide16($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
+        fn __invalid_wide16 $(< $( $#lt_var ),+ >)? ($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
             let __instruction_ptr = ($#load_var) as *const u8;
             let __opcode_ptr = unsafe { __instruction_ptr.add(1) };
             let (__opcode, _) = unsafe {
@@ -731,7 +733,7 @@ pub(crate) fn generate_tail_interpreter_runtime(
 
         #[allow(unused_variables)]
         #[inline(always)]
-        fn __invalid_wide32($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
+        fn __invalid_wide32 $(< $( $#lt_var ),+ >)? ($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
             let __instruction_ptr = ($#load_var) as *const u8;
             let __opcode_ptr = unsafe { __instruction_ptr.add(1) };
             let (__opcode, _) = unsafe {
@@ -745,7 +747,7 @@ pub(crate) fn generate_tail_interpreter_runtime(
 
         #[allow(unused_variables)]
         #[inline(always)]
-        fn __dispatch($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
+        fn __dispatch $(< $( $#lt_var ),+ >)? ($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
             let __instruction_ptr = ($#load_var) as *const u8;
             unsafe {
                 let __opcode_prefix = __instruction_ptr.read();
@@ -756,19 +758,21 @@ pub(crate) fn generate_tail_interpreter_runtime(
 
         #[allow(unused_variables)]
         #[inline(always)]
-        fn __dispatch_wide16($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
+        fn __dispatch_wide16 $(< $( $#lt_var ),+ >)? ($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
             let __instruction_ptr = ($#load_var) as *const u8;
             unsafe {
                 let __opcode_ptr =  __instruction_ptr.add(1);
                 let __opcode = __opcode_ptr.cast::<u16>().read_unaligned();
-                let __entry = *__DISPATCH_TABLE_WIDE16.get_unchecked(__opcode as usize);
+                let __opcode_index = __opcode as usize;
+                debug_assert!(__opcode_index < __DISPATCH_TABLE_WIDE16.len());
+                let __entry = *__DISPATCH_TABLE_WIDE16.get_unchecked(__opcode_index);
                 become __entry($( $#param_var, )*)
             }
         }
 
         #[allow(unused_variables)]
         #[inline(always)]
-        fn __dispatch_wide32($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
+        fn __dispatch_wide32 $(< $( $#lt_var ),+ >)? ($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
             let __instruction_ptr = ($#load_var) as *const u8;
             unsafe {
                 let __opcode_ptr =  __instruction_ptr.add(1);
@@ -777,9 +781,9 @@ pub(crate) fn generate_tail_interpreter_runtime(
 
                 debug_assert!(__opcode_index < __DISPATCH_TABLE_WIDE32.len());
                 let __entry = *__DISPATCH_TABLE_WIDE32.get_unchecked(__opcode_index);
-                
+
                 become __entry($( $#param_var, )*)
-            
+
             }
         }
 
@@ -793,21 +797,21 @@ pub(crate) fn generate_tail_interpreter_runtime(
             __table
         }
 
-        const fn __build_dispatch_table_wide16() -> [__DispatchFn; 65536] {
-            let mut __table = [__invalid_wide16 as __DispatchFn; 65536];
+        const fn __build_dispatch_table_wide16() -> [__DispatchFn; #wide_table_len] {
+            let mut __table = [__invalid_wide16 as __DispatchFn; #wide_table_len];
             #(#wide16_table_assignments)*
             __table
         }
 
-        const fn __build_dispatch_table_wide32() -> [__DispatchFn; 65536] {
-            let mut __table = [__invalid_wide32 as __DispatchFn; 65536];
+        const fn __build_dispatch_table_wide32() -> [__DispatchFn; #wide_table_len] {
+            let mut __table = [__invalid_wide32 as __DispatchFn; #wide_table_len];
             #(#wide32_table_assignments)*
             __table
         }
 
         static __DISPATCH_TABLE_NARROW: [__DispatchFn; 256] = __build_dispatch_table_narrow();
-        static __DISPATCH_TABLE_WIDE16: [__DispatchFn; 65536] = __build_dispatch_table_wide16();
-        static __DISPATCH_TABLE_WIDE32: [__DispatchFn; 65536] = __build_dispatch_table_wide32();
+        static __DISPATCH_TABLE_WIDE16: [__DispatchFn; #wide_table_len] = __build_dispatch_table_wide16();
+        static __DISPATCH_TABLE_WIDE32: [__DispatchFn; #wide_table_len] = __build_dispatch_table_wide32();
 
         become __dispatch($( $#param_var, )*)
     }
@@ -838,6 +842,7 @@ pub(crate) fn generate_tail_interpreter_dispatch_fns(
     let decoded_ident = format_ident!("__decoded_{}", opcode.name.snake_case);
     let handler_ident = format_ident!("__{}_handler", opcode.name.snake_case);
     let load_var = format_ident!("__load");
+    let lt_var = format_ident!("__lt");
     let param_var = format_ident!("__param");
     let param_ty_var = format_ident!("__param_ty");
     let next_ip_binding_var = format_ident!("__next_ip_binding");
@@ -923,7 +928,7 @@ pub(crate) fn generate_tail_interpreter_dispatch_fns(
         quote! {
             #[allow(unused_variables, unused_mut, unused_assignments)]
             #[inline(always)]
-            fn #dispatch_ident($( mut $#param_var: $#param_ty_var, )*) -> #ret_ty {
+            fn #dispatch_ident $(< $( $#lt_var ),+ >)? ($( mut $#param_var: $#param_ty_var, )*) -> #ret_ty {
                 let __instruction_ptr = ($#load_var) as *const u8;
                 let __width = #width_expr;
                 let __ip = unsafe { __instruction_ptr.add(#header_len) };
@@ -945,6 +950,7 @@ pub(crate) fn generate_packed_tail_interpreter_runtime(
     ret_ty: &TokenStream2,
 ) -> TokenStream2 {
     let load_var = format_ident!("__load");
+    let lt_var = format_ident!("__lt");
     let invalid_opcode_binding_var = format_ident!("__invalid_opcode_binding");
     let invalid_width_binding_var = format_ident!("__invalid_width_binding");
     let invalid_expr_var = format_ident!("__invalid_expr");
@@ -981,11 +987,11 @@ pub(crate) fn generate_packed_tail_interpreter_runtime(
     );
 
     quote! {
-        type __DispatchFn = fn($( $#param_ty_var, )*) -> #ret_ty;
+        type __DispatchFn = $(for<$( $#lt_var ),+>)? fn($( $#param_ty_var, )*) -> #ret_ty;
 
         #[allow(unused_variables)]
         #[inline(always)]
-        fn __invalid_packed($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
+        fn __invalid_packed $(< $( $#lt_var ),+ >)? ($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
             let __instruction_ptr = ($#load_var) as *const u8;
             let __first_word = unsafe { __instruction_ptr.cast::<u32>().read_unaligned() };
             let __opcode = #crate_path::core::extract_packed_bits(__first_word, 0, 8);
@@ -994,7 +1000,7 @@ pub(crate) fn generate_packed_tail_interpreter_runtime(
 
         #[allow(unused_variables)]
         #[inline(always)]
-        fn __dispatch($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
+        fn __dispatch $(< $( $#lt_var ),+ >)? ($( $#param_var: $#param_ty_var, )*) -> #ret_ty {
             let __instruction_ptr = ($#load_var) as *const u8;
             unsafe {
                 let __first_word = __instruction_ptr.cast::<u32>().read_unaligned();
@@ -1029,6 +1035,7 @@ pub(crate) fn generate_packed_tail_interpreter_dispatch_fn(
     let decoded_ident = format_ident!("__decoded_{}", opcode.name.snake_case);
     let handler_ident = format_ident!("__{}_handler", opcode.name.snake_case);
     let load_var = format_ident!("__load");
+    let lt_var = format_ident!("__lt");
     let param_var = format_ident!("__param");
     let param_ty_var = format_ident!("__param_ty");
     let next_ip_binding_var = format_ident!("__next_ip_binding");
@@ -1061,7 +1068,7 @@ pub(crate) fn generate_packed_tail_interpreter_dispatch_fn(
     quote! {
         #[allow(unused_variables, unused_mut, unused_assignments)]
         #[inline(always)]
-        fn #dispatch_ident($( mut $#param_var: $#param_ty_var, )*) -> #ret_ty {
+        fn #dispatch_ident $(< $( $#lt_var ),+ >)? ($( mut $#param_var: $#param_ty_var, )*) -> #ret_ty {
             let __instruction_ptr = ($#load_var) as *const u8;
             #decode_statements
             #metadata_id_decode
@@ -1335,7 +1342,26 @@ mod tests {
         assert!(!runtime.contains("type __DispatchFn = fn (* const u8"));
         assert!(!runtime.contains("become __entry (__instruction_ptr"));
         assert!(!runtime.contains("fn __dispatch_noop_narrow (__instruction_ptr"));
-        assert!(runtime.contains("fn __dispatch_noop_narrow ("));
+        assert!(runtime.contains("fn __dispatch_noop_narrow"));
+    }
+
+    #[test]
+    fn tail_interpreter_dispatch_threads_lifetimes() {
+        let rules = generate_interpreter_rules(
+            &schema(),
+            &quote!(bytecodegen),
+            InterpreterMacroFlavor::TailPath,
+        )
+        .into_iter()
+        .map(|tokens| tokens.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+        assert!(rules.contains("type __DispatchFn"));
+        assert!(rules.contains("for <"));
+        assert!(rules.contains("__lt"));
+        assert!(rules.contains("fn __dispatch"));
+        assert!(rules.contains("fn __dispatch_noop_narrow"));
     }
 
     #[test]
@@ -1345,10 +1371,20 @@ mod tests {
                 .to_string();
 
         assert!(runtime.contains("__opcode_index"));
-        assert!(runtime.contains("debug_assert"));
+        assert!(runtime.contains("debug_assert ! (__opcode_index < __DISPATCH_TABLE_WIDE32"));
         assert!(runtime.contains("__DISPATCH_TABLE_WIDE32") && runtime.contains("len ()"));
         assert!(runtime.contains("get_unchecked"));
         assert!(runtime.contains("__invalid_wide32 as __DispatchFn"));
+    }
+
+    #[test]
+    fn tail_interpreter_sizes_wide_tables_to_schema() {
+        let runtime =
+            generate_tail_interpreter_runtime(&schema(), &quote!(bytecodegen), &quote!(()))
+                .to_string();
+
+        assert!(runtime.contains("[__DispatchFn ; 2usize]"));
+        assert!(!runtime.contains("[__DispatchFn ; 65536]"));
     }
 
     #[test]

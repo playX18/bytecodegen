@@ -16,7 +16,7 @@ use crate::parse::{
 };
 
 use super::packed::plan_body_packed_layout;
-use super::validation::{validate_packed_encoding, validate_packed_opcode_count};
+use super::validation::{validate_opcode_count, validate_packed_encoding};
 
 pub(crate) fn is_packed_encoding(encoding: EncodingModel) -> bool {
     matches!(encoding, EncodingModel::Packed { .. })
@@ -71,7 +71,7 @@ impl SchemaModel {
                             "opcode",
                         )?;
                         opcodes_in_source_order.push(opcode.clone());
-                        validate_packed_opcode_count(
+                        validate_opcode_count(
                             encoding,
                             all_opcodes.len() + opcodes_in_source_order.len(),
                             opcode.name.ident.span(),
@@ -117,7 +117,7 @@ impl SchemaModel {
                                     encoding,
                                 )?,
                             });
-                            validate_packed_opcode_count(
+                            validate_opcode_count(
                                 encoding,
                                 all_opcodes.len() + opcodes_in_source_order.len(),
                                 member.ident.span(),
