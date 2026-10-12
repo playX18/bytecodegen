@@ -13,6 +13,7 @@ syn::custom_keyword!(preserve_order);
 syn::custom_keyword!(absolute);
 syn::custom_keyword!(debug);
 syn::custom_keyword!(relative_next);
+syn::custom_keyword!(relative_start);
 syn::custom_keyword!(verify);
 syn::custom_keyword!(stack_balance);
 syn::custom_keyword!(jump_target_valid);

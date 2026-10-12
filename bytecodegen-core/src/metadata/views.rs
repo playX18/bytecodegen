@@ -115,9 +115,9 @@ pub trait LinkedBytecodeView {
     fn bytes(&self) -> &[u8];
     /// Returns the per-instruction ordinal table.
     fn instructions(&self) -> &[LinkedInstructionEntry];
-    /// Returns the metadata type table indexed by opcode id.
+    /// Returns the metadata type table indexed by opcode table index
     fn metadata_types(&self) -> &[MetadataTypeSpec];
-    /// Returns the metadata slot counts indexed by opcode id.
+    /// Returns the metadata slot counts indexed by opcode table index.
     fn metadata_counts(&self) -> &[u32];
     /// Returns the raw metadata-table bytes.
     fn metadata_bytes(&self) -> &[u8];

@@ -263,6 +263,8 @@ fn gen_enum_operand(
                 }
             }
 
+            const IS_SIGNED: bool = <#repr as #crate_path::Operand>::IS_SIGNED;
+
             fn can_decode_from_ptr() -> bool { true }
 
             #[inline(always)]
@@ -358,10 +360,6 @@ fn gen_optional_operand_enum(
     })
 }
 
-// ---------------------------------------------------------------------------
-// Enum RelocationField impl
-// ---------------------------------------------------------------------------
-
 fn gen_enum_relocation_field(
     crate_path: &TokenStream2,
     name: &Ident,
@@ -402,10 +400,6 @@ fn gen_enum_relocation_field(
     })
 }
 
-// ---------------------------------------------------------------------------
-// Newtype Operand impl
-// ---------------------------------------------------------------------------
-
 fn gen_newtype_operand(
     crate_path: &TokenStream2,
     name: &Ident,
@@ -436,6 +430,8 @@ fn gen_newtype_operand(
                 <#inner_type as #crate_path::Operand>::decode(width, input).map(Self)
             }
 
+            const IS_SIGNED: bool = <#inner_type as #crate_path::Operand>::IS_SIGNED;
+
             fn can_decode_from_ptr() -> bool {
                 <#inner_type as #crate_path::Operand>::can_decode_from_ptr()
             }
@@ -448,10 +444,6 @@ fn gen_newtype_operand(
         }
     })
 }
-
-// ---------------------------------------------------------------------------
-// Newtype OptionalOperand impl
-// ---------------------------------------------------------------------------
 
 fn gen_optional_operand_newtype(
     crate_path: &TokenStream2,
@@ -518,10 +510,6 @@ fn gen_optional_operand_newtype(
         }
     })
 }
-
-// ---------------------------------------------------------------------------
-// Newtype RelocationField impl
-// ---------------------------------------------------------------------------
 
 fn gen_newtype_relocation_field(
     crate_path: &TokenStream2,

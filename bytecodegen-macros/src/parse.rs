@@ -555,6 +555,7 @@ pub(crate) fn parse_relocatable_attr(attr: &Attribute) -> Result<RelocationDecl>
 pub(crate) enum RelocationDecl {
     Absolute,
     RelativeNext,
+    RelativeStart,
 }
 
 impl Parse for RelocationDecl {
@@ -565,10 +566,13 @@ impl Parse for RelocationDecl {
         } else if input.peek(kw::relative_next) {
             input.parse::<kw::relative_next>()?;
             Ok(Self::RelativeNext)
+        } else if input.peek(kw::relative_start) {
+            input.parse::<kw::relative_start>()?;
+            Ok(Self::RelativeStart)
         } else {
             Err(Error::new(
                 input.span(),
-                "expected `absolute` or `relative_next` in relocation annotation",
+                "expected `absolute`, `relative_next` or `relative_start` in relocation annotation",
             ))
         }
     }

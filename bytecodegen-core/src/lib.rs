@@ -43,8 +43,9 @@ pub use traits::{
     Operand, OptionalOperand,
 };
 pub use width::{
-    Label, MAX_INSTRUCTION_HEADER_BYTES, OperandWidth, RelocValue, RelocationField, RelocationKind,
-    instruction_header_len, instruction_opcode_fits_width, relocation_target_offset,
+    FIRST_OPCODE_ID, Label, MAX_INSTRUCTION_HEADER_BYTES, OperandWidth, RelocValue,
+    RelocationField, RelocationKind, WIDE16_PREFIX, WIDE32_PREFIX, instruction_header_len,
+    instruction_opcode_fits_width, relocation_target_offset,
 };
 
 pub use debug::{DebugId, DebugMap, DebugTable, LinkedDebugInfo, LinkedProgram};
@@ -54,8 +55,9 @@ pub use disassembly::{
 };
 pub use metadata::{
     LinkAllocations, LinkBackendV2, LinkSpec, LinkedArtifactSpec, LinkedBytecodeView,
-    LinkedInstructionEntry, MetadataHeaderEntry, MetadataTableLayout, MetadataTableView,
-    MetadataTableViewMut, MetadataTypeSpec, NativeHeapBackend, NativeLinkedBytecode, Placement,
-    initialize_metadata_table, metadata_slot_ptr, plan_metadata_table,
+    LinkedInstructionEntry, MetadataHeaderEntry, MetadataId, MetadataTableLayout,
+    MetadataTableView, MetadataTableViewMut, MetadataTypeSpec, NativeHeapBackend,
+    NativeLinkedBytecode, Placement, initialize_metadata_table, metadata_slot_ptr,
+    plan_metadata_table,
 };
 pub use verify::{VerificationError, VerificationResult, Verifier};

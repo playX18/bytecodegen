@@ -111,6 +111,8 @@ macro_rules! impl_signed_encoding {
                     <$ty>::try_from(raw).map_err(|_| DecodeError::InvalidValue("signed value does not fit target type"))
                 }
 
+                const IS_SIGNED: bool = true;
+
                 fn encoded_len(width: OperandWidth) -> usize {
                     width.bytes()
                 }

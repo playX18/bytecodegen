@@ -68,6 +68,7 @@ impl FieldModel {
 pub(crate) enum RelocationModel {
     Absolute,
     RelativeNext,
+    RelativeStart,
 }
 
 impl RelocationModel {
@@ -75,6 +76,7 @@ impl RelocationModel {
         match self {
             Self::Absolute => quote!(#crate_path::core::RelocationKind::Absolute),
             Self::RelativeNext => quote!(#crate_path::core::RelocationKind::RelativeNext),
+            Self::RelativeStart => quote!(#crate_path::core::RelocationKind::RelativeStart),
         }
     }
 }

@@ -13,6 +13,7 @@ pub(crate) fn generate_opcode_items(
     opcode_value: u32,
     crate_path: &TokenStream2,
     has_debug: bool,
+    metadata_kind: Option<usize>,
 ) -> TokenStream2 {
     let opcode_ident = &opcode.name.ident;
     let section_ident = &opcode.section.ident;
@@ -23,12 +24,15 @@ pub(crate) fn generate_opcode_items(
     let has_metadata = !opcode.body.metadata.is_empty();
     let args_len = opcode.body.args.len() + usize::from(has_metadata);
     let metadata_id_docs = vec!["Linked metadata table slot for this instruction.".to_string()];
-    let descriptor_docs = render_doc_attrs(&opcode_descriptor_doc_lines(opcode, opcode_value));
+    // `opcode_value` is the schema position; the wire id adds the two
+    // reserved prefix ids.
+    let wire_value = opcode_value + crate::FIRST_OPCODE_ID;
+    let table_index = opcode_value as usize;
+    let descriptor_docs = render_doc_attrs(&opcode_descriptor_doc_lines(opcode, wire_value));
     let opcode_name = &opcode.name.snake_case;
     let opcode_mnemonic = &opcode.name.kebab_case;
 
-    let opcode_docs =
-        combine_doc_attrs(&opcode.docs, opcode_struct_doc_lines(opcode, opcode_value));
+    let opcode_docs = combine_doc_attrs(&opcode.docs, opcode_struct_doc_lines(opcode, wire_value));
 
     let metadata_struct = if opcode.body.metadata.is_empty() {
         quote!()
@@ -43,6 +47,9 @@ pub(crate) fn generate_opcode_items(
 
         quote! {
             #docs
+            // No `Copy`: payload types are arbitrary, and `derive(Copy)`
+            // rejects fields that are not `Copy` instead of bounding away.
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
             pub struct #metadata_struct_ident {
                 #(#metadata_fields)*
             }
@@ -120,7 +127,7 @@ pub(crate) fn generate_opcode_items(
         .collect::<Vec<_>>();
     if has_metadata {
         let docs = render_doc_attrs(&metadata_id_docs);
-        struct_fields.push(quote!(#docs pub #metadata_id_ident: u32,));
+        struct_fields.push(quote!(#docs pub #metadata_id_ident: #crate_path::core::MetadataId,));
     }
 
     let new_params = opcode.body.args.iter().map(|field| {
@@ -143,7 +150,7 @@ pub(crate) fn generate_opcode_items(
         })
         .collect::<Vec<_>>();
     if has_metadata {
-        new_initializers.push(quote!(#metadata_id_ident: 0,));
+        new_initializers.push(quote!(#metadata_id_ident: #crate_path::core::MetadataId(0),));
     }
 
     let metadata_helpers = if opcode.body.metadata.is_empty() {
@@ -164,8 +171,8 @@ pub(crate) fn generate_opcode_items(
                 table: &'a #crate_path::core::MetadataTableView<'_>,
             ) -> Option<&'a #metadata_struct_ident> {
                 table.get_typed::<#metadata_struct_ident>(
-                    OpcodeId::#opcode_ident as usize,
-                    self.#metadata_id_ident,
+                    #table_index,
+                    self.#metadata_id_ident.0,
                 )
             }
 
@@ -174,8 +181,8 @@ pub(crate) fn generate_opcode_items(
                 table: &'a mut #crate_path::core::MetadataTableViewMut<'_>,
             ) -> Option<&'a mut #metadata_struct_ident> {
                 table.get_typed_mut::<#metadata_struct_ident>(
-                    OpcodeId::#opcode_ident as usize,
-                    self.#metadata_id_ident,
+                    #table_index,
+                    self.#metadata_id_ident.0,
                 )
             }
         }
@@ -223,7 +230,9 @@ pub(crate) fn generate_opcode_items(
         })
         .collect::<Vec<_>>();
     if has_metadata {
-        encode_len_terms.push(quote!(<u32 as #crate_path::core::Operand>::encoded_len(width)));
+        encode_len_terms.push(
+            quote!(<#crate_path::core::MetadataId as #crate_path::core::Operand>::encoded_len(width)),
+        );
     }
 
     let mut encode_args = opcode
@@ -242,7 +251,7 @@ pub(crate) fn generate_opcode_items(
         .collect::<Vec<_>>();
     if has_metadata {
         encode_args.push(quote!(
-            <u32 as #crate_path::core::Operand>::encode(&self.#metadata_id_ident, width, output);
+            <#crate_path::core::MetadataId as #crate_path::core::Operand>::encode(&self.#metadata_id_ident, width, output);
         ));
     }
 
@@ -262,7 +271,7 @@ pub(crate) fn generate_opcode_items(
         .collect::<Vec<_>>();
     if has_metadata {
         check_args.push(quote!(
-            <u32 as #crate_path::core::Operand>::fits_width(&self.#metadata_id_ident, width)
+            <#crate_path::core::MetadataId as #crate_path::core::Operand>::fits_width(&self.#metadata_id_ident, width)
         ));
     }
 
@@ -282,7 +291,7 @@ pub(crate) fn generate_opcode_items(
         .collect::<Vec<_>>();
     if has_metadata {
         decode_args.push(quote!(
-            let #metadata_id_ident = <u32 as #crate_path::core::Operand>::decode(width, input)?;
+            let #metadata_id_ident = <#crate_path::core::MetadataId as #crate_path::core::Operand>::decode(width, input)?;
         ));
     }
 
@@ -346,7 +355,9 @@ pub(crate) fn generate_opcode_items(
         })
         .collect::<Vec<_>>();
     if has_metadata {
-        disassemble_bounds.push(quote!(Formatter: #crate_path::core::FormatOperand<u32, Ctx>,));
+        disassemble_bounds.push(
+            quote!(Formatter: #crate_path::core::FormatOperand<#crate_path::core::MetadataId, Ctx>,),
+        );
     }
     let mut disassemble_args = opcode
         .body
@@ -412,7 +423,7 @@ pub(crate) fn generate_opcode_items(
                 instruction,
                 operand_index: #operand_index,
             };
-            <Formatter as #crate_path::core::FormatOperand<u32, Ctx>>::format_operand(
+            <Formatter as #crate_path::core::FormatOperand<#crate_path::core::MetadataId, Ctx>>::format_operand(
                 formatter,
                 &self.#metadata_id_ident,
                 context,
@@ -639,7 +650,8 @@ pub(crate) fn generate_opcode_items(
         })
         .collect::<Vec<_>>();
     if has_metadata {
-        materialize_fields.push(quote!(#metadata_id_ident,));
+        materialize_fields
+            .push(quote!(#metadata_id_ident: #crate_path::core::MetadataId(#metadata_id_ident),));
     }
 
     let linker_metadata_helpers = if has_metadata {
@@ -913,11 +925,192 @@ pub(crate) fn generate_opcode_items(
         }
     };
 
+    let operand_consts: Vec<TokenStream2> = opcode
+        .body
+        .args
+        .iter()
+        .enumerate()
+        .map(|(i, field)| {
+            let upper = field.ident.to_string().to_ascii_uppercase();
+            let op_name = format_ident!("OPERAND_{}", upper);
+            let sign_name = format_ident!("SIGNED_{}", upper);
+            let ty = &field.ty;
+            quote! {
+                pub const #op_name: usize = #i;
+                pub const #sign_name: bool =
+                    <#ty as #crate_path::core::Operand>::IS_SIGNED;
+            }
+        })
+        .collect();
+
+    // `metadata_id` encodes last when present.
+    let metadata_id_consts = if has_metadata {
+        let i = opcode.body.args.len();
+        quote! {
+            pub const OPERAND_METADATA_ID: usize = #i;
+            pub const SIGNED_METADATA_ID: bool = false;
+        }
+    } else {
+        quote! {}
+    };
+
+    // `METADATA_<FIELD>` is the field's index in the opcode's metadata struct.
+    let metadata_field_consts: Vec<TokenStream2> = opcode
+        .body
+        .metadata
+        .iter()
+        .enumerate()
+        .map(|(j, field)| {
+            let name = format_ident!("METADATA_{}", field.ident.to_string().to_ascii_uppercase());
+            quote! {
+                pub const #name: usize = #j;
+            }
+        })
+        .collect();
+
+    let metadata_kind_const = metadata_kind.map(|kind| {
+        quote! {
+            pub const METADATA_KIND: usize = #kind;
+        }
+    });
+
+    let size_fns = quote! {
+        /// Encoded length at narrow, wide16 and wide32, header included.
+        pub const LEN: [usize; 3] = [
+            Self::size(#crate_path::core::OperandWidth::Narrow),
+            Self::size(#crate_path::core::OperandWidth::Wide16),
+            Self::size(#crate_path::core::OperandWidth::Wide32),
+        ];
+
+        /// Bytes before the first operand: 1 for narrow, 3 for wide16,
+        /// 5 for wide32 (a prefix byte plus the opcode at operand width).
+        pub const fn header_size(width: #crate_path::core::OperandWidth) -> usize {
+            match width {
+                #crate_path::core::OperandWidth::Narrow => 1,
+                #crate_path::core::OperandWidth::Wide16 => 3,
+                #crate_path::core::OperandWidth::Wide32 => 5,
+            }
+        }
+
+        #[inline(always)]
+        pub const fn header_size_static<const WIDTH: u8>() -> usize {
+            Self::header_size(#crate_path::core::OperandWidth::from_index(WIDTH))
+        }
+
+        /// Total encoded size at `width`.
+        pub const fn size(width: #crate_path::core::OperandWidth) -> usize {
+            Self::header_size(width) + #args_len * width.bytes()
+        }
+
+        #[inline(always)]
+        pub const fn size_static<const WIDTH: u8>() -> usize {
+            Self::size(#crate_path::core::OperandWidth::from_index(WIDTH))
+        }
+    };
+
+    let mut ptr_decode_stmts: Vec<TokenStream2> = opcode
+        .body
+        .args
+        .iter()
+        .map(|field| {
+            let ident = &field.ident;
+            let ty = &field.ty;
+            if field.optional {
+                quote! {
+                    debug_assert!(<#ty as #crate_path::core::Operand>::can_decode_from_ptr());
+                    let (#ident, ptr) = unsafe {
+                        <#ty as #crate_path::core::OptionalOperand>::decode_optional_from_ptr(width, ptr)
+                    };
+                }
+            } else {
+                quote! {
+                    debug_assert!(<#ty as #crate_path::core::Operand>::can_decode_from_ptr());
+                    let (#ident, ptr) = unsafe {
+                        <#ty as #crate_path::core::Operand>::decode_from_ptr(width, ptr)
+                    };
+                }
+            }
+        })
+        .collect();
+    let mut ptr_decode_inits: Vec<TokenStream2> = opcode
+        .body
+        .args
+        .iter()
+        .map(|field| {
+            let ident = &field.ident;
+            quote!(#ident,)
+        })
+        .collect();
+    if has_metadata {
+        ptr_decode_stmts.push(quote! {
+            let (#metadata_id_ident, ptr) = unsafe {
+                <#crate_path::core::MetadataId as #crate_path::core::Operand>::decode_from_ptr(width, ptr)
+            };
+        });
+        ptr_decode_inits.push(quote!(#metadata_id_ident,));
+    }
+
+    let decode_ptr_fns = quote! {
+        /// Decode the operands at `ptr` (past the header) without bounds checks.
+        ///
+        /// # Safety
+        /// `ptr` points at readable bytes holding this instruction's operands
+        /// at `width`, and every operand type supports the pointer fast path.
+        #[inline(always)]
+        pub unsafe fn decode_from_ptr(
+            ptr: *const u8,
+            width: #crate_path::core::OperandWidth,
+        ) -> (Self, *const u8) {
+            #(#ptr_decode_stmts)*
+            (Self { #(#ptr_decode_inits)* }, ptr)
+        }
+
+        /// `decode_from_ptr` with the width as a const index (`OperandWidth::from_index`).
+        ///
+        /// # Safety
+        /// Same as `decode_from_ptr`.
+        #[inline(always)]
+        pub unsafe fn decode_from_ptr_static<const WIDTH: u8>(
+            ptr: *const u8,
+        ) -> (Self, *const u8) {
+            unsafe {
+                Self::decode_from_ptr(ptr, #crate_path::core::OperandWidth::from_index(WIDTH))
+            }
+        }
+    };
+
+    // Flat-area accessor: VMs that keep metadata in a `MetadataLayout` area
+    // (instead of the linker's table) read entries through this.
+    let metadata_ptr_fn = if has_metadata {
+        quote! {
+            /// Entry `id` of this opcode's metadata array.
+            ///
+            /// # Safety
+            /// `base` is an initialized flat metadata area with more than
+            /// `id` entries of this kind.
+            #[inline(always)]
+            pub unsafe fn metadata_ptr(
+                base: *mut u8,
+                id: #crate_path::core::MetadataId,
+            ) -> *mut #metadata_struct_ident {
+                unsafe {
+                    let offset = *(base as *const u32).add(Self::METADATA_KIND);
+                    base.add(offset as usize)
+                        .cast::<#metadata_struct_ident>()
+                        .add(id.0 as usize)
+                }
+            }
+        }
+    } else {
+        quote! {}
+    };
+
     quote! {
         #(#reloc_input_traits)*
         #metadata_struct
 
         #opcode_docs
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub struct #opcode_ident {
             #(#struct_fields)*
         }
@@ -939,6 +1132,14 @@ pub(crate) fn generate_opcode_items(
                     #(#new_initializers)*
                 }
             }
+
+            #(#operand_consts)*
+            #metadata_id_consts
+            #(#metadata_field_consts)*
+            #metadata_kind_const
+            #size_fns
+            #decode_ptr_fns
+            #metadata_ptr_fn
 
             #linker_metadata_helpers
             #linkable_helpers

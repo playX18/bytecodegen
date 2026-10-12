@@ -64,6 +64,10 @@ pub enum RelocationKind {
     Absolute,
     /// Store `label_offset - instruction_end_offset`.
     RelativeNext,
+    /// Store `label_offset - instruction_offset`: the displacement from the
+    /// start of the branching instruction, for VMs that add the offset to
+    /// the branch's own address.
+    RelativeStart,
 }
 
 impl RelocationKind {
@@ -84,6 +88,7 @@ impl RelocationKind {
                 )?;
                 Ok((label_offset as i128) - (base as i128))
             }
+            Self::RelativeStart => Ok((label_offset as i128) - (instruction_offset as i128)),
         }
     }
 }
@@ -120,12 +125,20 @@ pub fn relocation_target_offset(
             let target = base.checked_add(encoded_value)?;
             usize::try_from(target).ok()
         }
+        RelocationKind::RelativeStart => {
+            let target = (instruction_offset as i128).checked_add(encoded_value)?;
+            usize::try_from(target).ok()
+        }
     }
 }
 
-pub(crate) const WIDE16_PREFIX: u8 = 0xFE;
-pub(crate) const WIDE32_PREFIX: u8 = 0xFF;
-pub(crate) const MAX_NARROW_OPCODE: u16 = u8::MAX as u16 - 2;
+/// First byte of a wide16 instruction, the opcode follows as u16 LE.
+pub const WIDE16_PREFIX: u8 = 0x00;
+/// First byte of a wide32 instruction, the opcode follows as u32 LE.
+pub const WIDE32_PREFIX: u8 = 0x01;
+/// Lowest assignable opcode id. Ids 0 and 1 are the wide prefixes above,
+/// never opcodes, so the first schema opcode is id 2.
+pub const FIRST_OPCODE_ID: u16 = 2;
 
 /// The maximum number of bytes needed for an instruction header.
 pub const MAX_INSTRUCTION_HEADER_BYTES: usize = 5;
@@ -144,16 +157,34 @@ impl OperandWidth {
     pub const fn in_preference_order() -> [Self; 3] {
         [Self::Narrow, Self::Wide16, Self::Wide32]
     }
+
+    /// Index of this width: 0 for narrow, 1 for wide16, 2 for wide32.
+    pub const fn index(self) -> u8 {
+        match self {
+            Self::Narrow => 0,
+            Self::Wide16 => 1,
+            Self::Wide32 => 2,
+        }
+    }
+
+    /// Width for an index. Any index above 2 gives `Wide32`.
+    pub const fn from_index(index: u8) -> Self {
+        match index {
+            0 => Self::Narrow,
+            1 => Self::Wide16,
+            _ => Self::Wide32,
+        }
+    }
 }
 
 /// Returns whether `opcode` can be encoded in a header of `width`.
 ///
-/// Narrow headers reserve `0xFE` and `0xFF` as width prefixes, so only opcodes up to `0xFD`
-/// fit without widening the header.
+/// Narrow headers are one byte, so besides the reserved `WIDE16_PREFIX` and
+/// `WIDE32_PREFIX` every id up to `0xFF` fits without widening the header.
 
 pub const fn instruction_opcode_fits_width(opcode: u16, width: OperandWidth) -> bool {
     match width {
-        OperandWidth::Narrow => opcode <= MAX_NARROW_OPCODE,
+        OperandWidth::Narrow => opcode >= FIRST_OPCODE_ID && opcode <= u8::MAX as u16,
         OperandWidth::Wide16 | OperandWidth::Wide32 => true,
     }
 }

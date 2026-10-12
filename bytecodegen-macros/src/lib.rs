@@ -16,7 +16,8 @@ mod packed_gen;
 mod parse;
 mod schema_gen;
 
-pub(crate) const MAX_NARROW_OPCODE: u32 = u8::MAX as u32 - 2;
+/// Lowest assignable opcode id.
+pub(crate) const FIRST_OPCODE_ID: u32 = 2;
 
 #[proc_macro]
 pub fn bytecode_list(input: TokenStream) -> TokenStream {

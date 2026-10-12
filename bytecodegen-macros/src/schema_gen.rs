@@ -44,8 +44,15 @@ pub(crate) fn generate_schema(schema: &SchemaModel, crate_path: &TokenStream2) -
 
     let opcode_variants = schema.opcodes.iter().enumerate().map(|(index, opcode)| {
         let ident = &opcode.name.ident;
-        let docs = combine_doc_attrs(&opcode.docs, opcode_id_doc_lines(opcode, index as u32));
-        quote!(#docs #ident,)
+        // Explicit discriminants: the wire id is the schema index plus the
+        // two reserved prefix ids, so `OpcodeId as u16` is the encoded id.
+        let wire_id =
+            proc_macro2::Literal::u16_unsuffixed(index as u16 + crate::FIRST_OPCODE_ID as u16);
+        let docs = combine_doc_attrs(
+            &opcode.docs,
+            opcode_id_doc_lines(opcode, index as u32 + crate::FIRST_OPCODE_ID),
+        );
+        quote!(#docs #ident = #wire_id,)
     });
 
     let opcode_id_idents = schema.opcodes.iter().map(|opcode| &opcode.name.ident);
@@ -73,10 +80,51 @@ pub(crate) fn generate_schema(schema: &SchemaModel, crate_path: &TokenStream2) -
         quote!(OpcodeId::#ident => &#ident::DESCRIPTOR,)
     });
 
-    let opcode_items =
-        schema.opcodes.iter().enumerate().map(|(index, opcode)| {
-            generate_opcode_items(opcode, index as u32, crate_path, has_debug)
-        });
+    let opcode_id_idents_for_from_u8 = schema.opcodes.iter().map(|opcode| &opcode.name.ident);
+
+    let opcode_table_index_arms = schema.opcodes.iter().enumerate().map(|(index, opcode)| {
+        let ident = &opcode.name.ident;
+        quote!(OpcodeId::#ident => #index,)
+    });
+
+    // Kind numbers count metadata-bearing opcodes in schema order, so the
+    // flat metadata area can index kinds densely.
+    let mut metadata_kind_counter = 0usize;
+    let metadata_kinds: Vec<Option<usize>> = schema
+        .opcodes
+        .iter()
+        .map(|opcode| {
+            if opcode.body.metadata.is_empty() {
+                None
+            } else {
+                let kind = metadata_kind_counter;
+                metadata_kind_counter += 1;
+                Some(kind)
+            }
+        })
+        .collect();
+    let opcode_metadata_kind_arms: Vec<TokenStream2> = schema
+        .opcodes
+        .iter()
+        .zip(metadata_kinds.iter())
+        .map(|(opcode, kind)| {
+            let ident = &opcode.name.ident;
+            match kind {
+                Some(kind) => quote!(OpcodeId::#ident => Some(#kind),),
+                None => quote!(OpcodeId::#ident => None,),
+            }
+        })
+        .collect();
+
+    let opcode_items = schema.opcodes.iter().enumerate().map(|(index, opcode)| {
+        generate_opcode_items(
+            opcode,
+            index as u32,
+            crate_path,
+            has_debug,
+            metadata_kinds[index],
+        )
+    });
 
     let group_items = schema
         .groups
@@ -90,7 +138,10 @@ pub(crate) fn generate_schema(schema: &SchemaModel, crate_path: &TokenStream2) -
 
     let instruction_variants = schema.opcodes.iter().enumerate().map(|(index, opcode)| {
         let ident = &opcode.name.ident;
-        let docs = combine_doc_attrs(&opcode.docs, opcode_id_doc_lines(opcode, index as u32));
+        let docs = combine_doc_attrs(
+            &opcode.docs,
+            opcode_id_doc_lines(opcode, index as u32 + crate::FIRST_OPCODE_ID),
+        );
         quote!(#docs #ident(#ident),)
     });
 
@@ -295,7 +346,7 @@ pub(crate) fn generate_schema(schema: &SchemaModel, crate_path: &TokenStream2) -
     let packed_instruction_decode_record_from_arms =
         schema.opcodes.iter().enumerate().map(|(index, opcode)| {
             let ident = &opcode.name.ident;
-            let opcode_value = index as u32;
+            let opcode_value = index as u32 + crate::FIRST_OPCODE_ID;
             quote! {
                 #opcode_value => {
                     let word_len = #ident::__packed_layout().word_count;
@@ -340,9 +391,148 @@ pub(crate) fn generate_schema(schema: &SchemaModel, crate_path: &TokenStream2) -
 
     let instruction_decode_arms = schema.opcodes.iter().enumerate().map(|(index, opcode)| {
         let ident = &opcode.name.ident;
-        let opcode_value = index as u32;
+        let opcode_value = index as u32 + crate::FIRST_OPCODE_ID;
         quote!(#opcode_value => Ok(Self::#ident(<#ident as #crate_path::core::Decode>::decode_body(input, width)?)),)
     });
+
+    let instruction_body_arms = schema.opcodes.iter().enumerate().map(|(index, opcode)| {
+        let ident = &opcode.name.ident;
+        let opcode_value = index as u32 + crate::FIRST_OPCODE_ID;
+        quote!(#opcode_value => Self::#ident(<#ident as #crate_path::core::Decode>::decode_body(&mut cursor, width).ok()?),)
+    });
+
+    let instruction_size_arms = schema.opcodes.iter().enumerate().map(|(index, opcode)| {
+        let ident = &opcode.name.ident;
+        let opcode_value = index as u32 + crate::FIRST_OPCODE_ID;
+        quote!(#opcode_value => #ident::size(width),)
+    });
+
+    let instruction_jump_offset_arms = schema.opcodes.iter().map(|opcode| {
+        let ident = &opcode.name.ident;
+        let reloc_field = opcode.body.args.iter().find(|field| field.relocation.is_some());
+        match reloc_field {
+            Some(field) => {
+                let field_ident = &field.ident;
+                quote!(Self::#ident(op) => Some(#crate_path::core::RelocationField::to_relocation_value(&op.#field_ident)),)
+            }
+            None => quote!(Self::#ident(_) => None,),
+        }
+    });
+
+    let instruction_metadata_id_arms = schema.opcodes.iter().map(|opcode| {
+        let ident = &opcode.name.ident;
+        if opcode.body.metadata.is_empty() {
+            quote!(Self::#ident(_) => None,)
+        } else {
+            quote!(Self::#ident(op) => Some(op.metadata_id),)
+        }
+    });
+
+    // Flat metadata area: per-kind arrays behind a `[K u32 offsets]
+    // [K u32 counts][u64 buffer]` header, for VMs that manage metadata
+    // storage themselves instead of using the linker's table.
+    let num_metadata_kinds = metadata_kinds.iter().filter(|kind| kind.is_some()).count();
+    let flat_layout_new_arms: Vec<TokenStream2> = schema
+        .opcodes
+        .iter()
+        .zip(metadata_kinds.iter())
+        .filter_map(|(opcode, kind)| {
+            kind.map(|kind| {
+                let meta = format_ident!("{}Metadata", opcode.name.ident);
+                quote! {
+                    {
+                        let align_of = std::mem::align_of::<#meta>();
+                        if align_of > align {
+                            align = align_of;
+                        }
+                        size = size.next_multiple_of(align_of);
+                        offsets[#kind] = size as u32;
+                        size += counts[#kind] as usize * std::mem::size_of::<#meta>();
+                    }
+                }
+            })
+        })
+        .collect();
+    let flat_layout_init_arms: Vec<TokenStream2> = schema
+        .opcodes
+        .iter()
+        .zip(metadata_kinds.iter())
+        .filter_map(|(opcode, kind)| {
+            kind.map(|kind| {
+                let meta = format_ident!("{}Metadata", opcode.name.ident);
+                quote! {
+                    {
+                        let n = self.counts[#kind] as usize;
+                        let mut ptr = base.add(self.offsets[#kind] as usize).cast::<#meta>();
+                        for _ in 0..n {
+                            std::ptr::write(ptr, #meta::default());
+                            ptr = ptr.add(1);
+                        }
+                    }
+                }
+            })
+        })
+        .collect();
+
+    let for_each_opcode_entries = schema.opcodes.iter().map(|opcode| {
+        let variant = &opcode.name.ident;
+        let snake = format_ident!("{}", opcode.name.snake_case);
+        quote!((#variant, #snake),)
+    });
+    let for_each_metadata_entries: Vec<TokenStream2> = schema
+        .opcodes
+        .iter()
+        .zip(metadata_kinds.iter())
+        .filter_map(|(opcode, kind)| {
+            kind.map(|kind| {
+                let variant = &opcode.name.ident;
+                let meta = format_ident!("{}Metadata", opcode.name.ident);
+                let field_entries = opcode.body.metadata.iter().map(|field| {
+                    let name = &field.ident;
+                    let ty = &field.ty;
+                    quote!(#name: #ty)
+                });
+                quote!((#variant, #meta, #kind, { #(#field_entries),* }),)
+            })
+        })
+        .collect();
+
+    // Text describing every opcode, its operand names and types, and its
+    // metadata fields. Hash it to version serialized bytecode.
+    let mut signature_entries = Vec::new();
+    for opcode in &schema.opcodes {
+        let args: Vec<String> = opcode
+            .body
+            .args
+            .iter()
+            .map(|field| {
+                let ty = &field.ty;
+                let optional = if field.optional { "?" } else { "" };
+                let reloc = match field.relocation {
+                    Some(crate::model::RelocationModel::Absolute) => "@absolute",
+                    Some(crate::model::RelocationModel::RelativeNext) => "@relative_next",
+                    Some(crate::model::RelocationModel::RelativeStart) => "@relative_start",
+                    None => "",
+                };
+                format!("{}{}{}:{}", field.name(), optional, reloc, quote!(#ty))
+            })
+            .collect();
+        let mut entry = format!("{}({})", opcode.name.snake_case, args.join(","));
+        if !opcode.body.metadata.is_empty() {
+            let metas: Vec<String> = opcode
+                .body
+                .metadata
+                .iter()
+                .map(|field| {
+                    let ty = &field.ty;
+                    format!("{}:{}", field.name(), quote!(#ty))
+                })
+                .collect();
+            entry.push_str(&format!("[{}]", metas.join(",")));
+        }
+        signature_entries.push(entry);
+    }
+    let bytecode_signature = signature_entries.join(";");
 
     // Helper: for simple (no-metadata, no-reloc) variants, when has_debug they use
     // struct pattern { opcode, .. }, otherwise tuple pattern (opcode).
@@ -761,7 +951,7 @@ pub(crate) fn generate_schema(schema: &SchemaModel, crate_path: &TokenStream2) -
                                 let slot = metadata_slots[#index];
                                 metadata_slots[#index] += 1;
                                 let mut opcode = opcode;
-                                opcode.metadata_id = slot;
+                                opcode.metadata_id = #crate_path::core::MetadataId(slot);
                                 let size = <#ident as #crate_path::core::Encode>::encoded_len(&opcode, width);
                                 let end = offset + size;
                                 let mut sink = #crate_path::core::SliceSink::new(&mut code_bytes[offset..end]);
@@ -791,7 +981,7 @@ pub(crate) fn generate_schema(schema: &SchemaModel, crate_path: &TokenStream2) -
                                 let slot = metadata_slots[#index];
                                 metadata_slots[#index] += 1;
                                 let mut opcode = opcode;
-                                opcode.metadata_id = slot;
+                                opcode.metadata_id = #crate_path::core::MetadataId(slot);
                                 let size = <#ident as #crate_path::core::Encode>::encoded_len(&opcode, width);
                                 let end = offset + size;
                                 let mut sink = #crate_path::core::SliceSink::new(&mut code_bytes[offset..end]);
@@ -851,7 +1041,7 @@ pub(crate) fn generate_schema(schema: &SchemaModel, crate_path: &TokenStream2) -
                                     let slot = metadata_slots[#index];
                                     metadata_slots[#index] += 1;
                                     let mut opcode = opcode;
-                                    opcode.metadata_id = slot;
+                                    opcode.metadata_id = #crate_path::core::MetadataId(slot);
                                     let size = <#ident as #crate_path::core::Encode>::encoded_len(&opcode, width);
                                     let end = offset + size;
                                     let mut sink = #crate_path::core::SliceSink::new(&mut code_bytes[offset..end]);
@@ -881,7 +1071,7 @@ pub(crate) fn generate_schema(schema: &SchemaModel, crate_path: &TokenStream2) -
                                     let slot = metadata_slots[#index];
                                     metadata_slots[#index] += 1;
                                     let mut opcode = opcode;
-                                    opcode.metadata_id = slot;
+                                    opcode.metadata_id = #crate_path::core::MetadataId(slot);
                                     let size = <#ident as #crate_path::core::Encode>::encoded_len(&opcode, width);
                                     let end = offset + size;
                                     let mut sink = #crate_path::core::SliceSink::new(&mut code_bytes[offset..end]);
@@ -1837,6 +2027,33 @@ pub(crate) fn generate_schema(schema: &SchemaModel, crate_path: &TokenStream2) -
                         #(#opcode_descriptor_matches)*
                     }
                 }
+
+                /// Number of opcodes in the schema (width prefixes excluded).
+                pub const COUNT: usize = #schema_opcode_len;
+
+                /// Opcode for a narrow-header id byte, if it names an opcode.
+                pub const fn from_u8(value: u8) -> Option<Self> {
+                    match value as u16 {
+                        #(x if x == OpcodeId::#opcode_id_idents_for_from_u8 as u16 => Some(OpcodeId::#opcode_id_idents_for_from_u8),)*
+                        _ => None,
+                    }
+                }
+
+                /// Position of this opcode in schema order: its index into
+                /// metadata-type tables and link-time slot arrays.
+                pub const fn table_index(self) -> usize {
+                    match self {
+                        #(#opcode_table_index_arms)*
+                    }
+                }
+
+                /// Kind number of this opcode's metadata: its position among
+                /// the schema's metadata-bearing opcodes, if it has any.
+                pub const fn metadata_kind(self) -> Option<usize> {
+                    match self {
+                        #(#opcode_metadata_kind_arms)*
+                    }
+                }
             }
 
             impl TryFrom<u16> for OpcodeId {
@@ -1882,10 +2099,12 @@ pub(crate) fn generate_schema(schema: &SchemaModel, crate_path: &TokenStream2) -
                 #(#visitor_methods)*
             }
 
+            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
             pub enum Instruction {
                 #(#instruction_variants)*
             }
 
+            #[derive(Debug, Clone, PartialEq)]
             pub enum LinkableInstruction {
                 #(#linkable_variants)*
             }
@@ -1951,6 +2170,57 @@ pub(crate) fn generate_schema(schema: &SchemaModel, crate_path: &TokenStream2) -
                 pub const fn opcode_id(&self) -> OpcodeId {
                     match self {
                         #(#instruction_id_arms)*
+                    }
+                }
+
+                /// Decode the instruction at `code[pc..]`: the instruction,
+                /// its width, and its byte length. Returns `None` on
+                /// truncated input or unknown opcodes.
+                pub fn decode_slice(
+                    code: &[u8],
+                    pc: usize,
+                ) -> Option<(Self, #crate_path::core::OperandWidth, usize)> {
+                    let mut cursor = #crate_path::core::ByteCursor::new(code.get(pc..)?);
+                    let offset = cursor.position();
+                    let (width, opcode) =
+                        #crate_path::core::decode_instruction_header(&mut cursor).ok()?;
+                    let instruction = match opcode {
+                        #(#instruction_body_arms)*
+                        _ => return None,
+                    };
+                    Some((instruction, width, cursor.position() - offset))
+                }
+
+                /// Length of the instruction at `ptr` without decoding its operands.
+                ///
+                /// # Safety
+                /// `ptr` points at the first byte of a valid instruction.
+                /// Unknown opcode ids panic.
+                pub unsafe fn size_at_ptr(ptr: *const u8) -> usize {
+                    unsafe {
+                        let (width, opcode, _) =
+                            #crate_path::core::decode_instruction_header_from_ptr(ptr);
+                        match opcode {
+                            #(#instruction_size_arms)*
+                            _ => panic!("invalid opcode id {opcode}"),
+                        }
+                    }
+                }
+
+                /// Relocation value of the first relocatable operand, if any.
+                /// For relative kinds this is the displacement encoded in the
+                /// instruction; add it to the branch address (start) or to the
+                /// next instruction (next) per the field's kind.
+                pub fn jump_offset(&self) -> Option<i128> {
+                    match self {
+                        #(#instruction_jump_offset_arms)*
+                    }
+                }
+
+                /// Metadata slot of this instruction, if its opcode has any.
+                pub fn metadata_id(&self) -> Option<#crate_path::core::MetadataId> {
+                    match self {
+                        #(#instruction_metadata_id_arms)*
                     }
                 }
 
@@ -2280,6 +2550,98 @@ pub(crate) fn generate_schema(schema: &SchemaModel, crate_path: &TokenStream2) -
                 let formatter = #crate_path::core::DefaultOperandFormatter;
                 disassemble_linked_with(linked, context, &formatter, options)
             }
+
+            /// Number of metadata kinds: opcodes with a `metadata` block.
+            pub const NUM_METADATA_KINDS: usize = #num_metadata_kinds;
+
+            /// Byte offset of the buffer word from a flat area start: the
+            /// owning code buffer's address, written once at creation.
+            /// Records start after it; their offsets adapt through the
+            /// header table.
+            pub const METADATA_BUFFER_OFFSET: usize = NUM_METADATA_KINDS * 8;
+
+            /// Where each kind's array lives inside a flat metadata area.
+            #[derive(Clone, Debug)]
+            pub struct MetadataLayout {
+                pub offsets: [u32; NUM_METADATA_KINDS],
+                pub counts: [u32; NUM_METADATA_KINDS],
+                /// Total bytes, 0 when every count is 0.
+                pub size: usize,
+                /// Largest alignment of any metadata struct.
+                pub align: usize,
+            }
+
+            impl MetadataLayout {
+                pub fn new(counts: &[u32; NUM_METADATA_KINDS]) -> Self {
+                    let mut offsets = [0u32; NUM_METADATA_KINDS];
+                    // Header: offsets then counts, both u32 * K, then the
+                    // 8-byte buffer word (always 8-aligned: K * 8 + 8).
+                    let mut size: usize = NUM_METADATA_KINDS * 8 + 8;
+                    let mut align: usize = 1;
+                    #(#flat_layout_new_arms)*
+                    if counts.iter().all(|count| *count == 0) {
+                        size = 0;
+                    }
+                    Self {
+                        offsets,
+                        counts: *counts,
+                        size,
+                        align,
+                    }
+                }
+
+                /// Write the header and default-initialize every entry.
+                ///
+                /// # Safety
+                /// `base` points to `self.size` writable bytes aligned to `self.align`.
+                pub unsafe fn init(&self, base: *mut u8) {
+                    unsafe {
+                        for k in 0..NUM_METADATA_KINDS {
+                            (base as *mut u32).add(k).write(self.offsets[k]);
+                            (base as *mut u32)
+                                .add(NUM_METADATA_KINDS + k)
+                                .write(self.counts[k]);
+                        }
+                        #(#flat_layout_init_arms)*
+                    }
+                }
+            }
+
+            /// Number of entries of `kind` in an initialized flat metadata area.
+            ///
+            /// # Safety
+            /// `base` was initialized by `MetadataLayout::init`.
+            #[inline(always)]
+            pub unsafe fn metadata_count(base: *const u8, kind: usize) -> u32 {
+                unsafe { *(base as *const u32).add(NUM_METADATA_KINDS + kind) }
+            }
+
+            #[doc(hidden)]
+            macro_rules! __bytecodegen_for_each_opcode {
+                ($callback:ident) => {
+                    $callback! {
+                        #(#for_each_opcode_entries)*
+                    }
+                };
+            }
+            #[allow(unused_imports)]
+            pub(crate) use __bytecodegen_for_each_opcode as for_each_opcode;
+
+            #[doc(hidden)]
+            macro_rules! __bytecodegen_for_each_metadata {
+                ($callback:ident) => {
+                    $callback! {
+                        #(#for_each_metadata_entries)*
+                    }
+                };
+            }
+            #[allow(unused_imports)]
+            pub(crate) use __bytecodegen_for_each_metadata as for_each_metadata;
+
+            /// Text describing every opcode, its operand names and types, and
+            /// its metadata fields. Changes whenever the encoding changes;
+            /// hash it to version serialized bytecode.
+            pub const BYTECODE_SIGNATURE: &str = #bytecode_signature;
 
             #interpreter_macro_items
 

@@ -129,9 +129,9 @@ impl SchemaModel {
                 }
             }
 
-            if section_decl.preserve_order {
-                validate_opcode_order(&opcodes_in_source_order)?;
-            } else {
+            // `preserve_order` keeps source order verbatim, including interleaved
+            // plain and metadata opcodes; only the default layout groups by category.
+            if !section_decl.preserve_order {
                 stable_sort_opcodes(&mut opcodes_in_source_order);
             }
 
@@ -367,6 +367,7 @@ pub(crate) fn build_fields_internal(
             relocation: field.relocation.map(|relocation| match relocation {
                 RelocationDecl::Absolute => RelocationModel::Absolute,
                 RelocationDecl::RelativeNext => RelocationModel::RelativeNext,
+                RelocationDecl::RelativeStart => RelocationModel::RelativeStart,
             }),
             ty: field.ty,
         });
@@ -401,36 +402,6 @@ pub(crate) fn validate_opcode_semantics(name: &NameModel, body: &BodyModel) -> R
             "checkpoints require a metadata block",
         ));
     }
-    Ok(())
-}
-
-pub(crate) fn validate_opcode_order(opcodes: &[OpcodeModel]) -> Result<()> {
-    let mut last_category = 0usize;
-    let mut last_name = None::<String>;
-
-    for opcode in opcodes {
-        let category = opcode.body.category();
-        if last_name.is_none() {
-            last_category = category;
-            last_name = Some(opcode.name.upper_camel.clone());
-            continue;
-        }
-
-        if category < last_category {
-            let previous = last_name.unwrap_or_default();
-            return Err(Error::new(
-                opcode.name.ident.span(),
-                format!(
-                    "invalid preserve_order layout: `{}` appears after `{previous}` but belongs to an earlier opcode category",
-                    opcode.name.upper_camel
-                ),
-            ));
-        }
-
-        last_category = category;
-        last_name = Some(opcode.name.upper_camel.clone());
-    }
-
     Ok(())
 }
 

@@ -6,13 +6,16 @@ use crate::error::{DecodeError, EmitError};
 use crate::width::OperandWidth;
 
 /// Trait for operand encoding and decoding.
-pub trait Operand: Sized + Copy {
+pub trait Operand: Sized + Copy + fmt::Debug {
     /// Returns whether `value` can be encoded at `width`.
     fn fits_width(value: &Self, width: OperandWidth) -> bool;
     /// Encodes `value` into `output` using `width`.
     fn encode<S: ByteSink + ?Sized>(value: &Self, width: OperandWidth, output: &mut S);
     /// Decodes a value of this type from `input` using `width`.
     fn decode(width: OperandWidth, input: &mut ByteCursor<'_>) -> Result<Self, DecodeError>;
+
+    /// Whether values decode with sign extension.
+    const IS_SIGNED: bool = false;
 
     /// Returns encode size of `value` at `width`.
     fn encoded_len(width: OperandWidth) -> usize {

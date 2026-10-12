@@ -44,6 +44,7 @@ pub(crate) fn hash_body(hasher: &mut StableHasher, body: &BodyModel) {
         hasher.write_str(match field.relocation {
             Some(crate::model::RelocationModel::Absolute) => "absolute",
             Some(crate::model::RelocationModel::RelativeNext) => "relative_next",
+            Some(crate::model::RelocationModel::RelativeStart) => "relative_start",
             None => "none",
         });
         hasher.write_str(&render_type_name(&field.ty));

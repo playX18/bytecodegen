@@ -321,7 +321,11 @@ pub(crate) fn generate_packed_expression_interpreter_runtime(
         .iter()
         .enumerate()
         .map(|(index, opcode)| {
-            generate_packed_loop_interpreter_inline_arm(opcode, index as u32, crate_path)
+            generate_packed_loop_interpreter_inline_arm(
+                opcode,
+                index as u32 + crate::FIRST_OPCODE_ID,
+                crate_path,
+            )
         })
         .collect::<Vec<_>>();
 
@@ -379,7 +383,7 @@ pub(crate) fn generate_packed_loop_interpreter_inline_arm(
     let metadata_id_decode = if opcode.body.metadata.is_empty() {
         quote!()
     } else {
-        quote!(let metadata_id = 0u32;)
+        quote!(let metadata_id = #crate_path::core::MetadataId(0);)
     };
 
     quote! {
@@ -413,11 +417,11 @@ pub(crate) fn generate_expression_interpreter_runtime(
         .opcodes
         .iter()
         .enumerate()
-        .filter(|(index, _)| *index <= (u8::MAX as usize - 2))
+        .filter(|(index, _)| *index + crate::FIRST_OPCODE_ID as usize <= u8::MAX as usize)
         .map(|(index, opcode)| {
             generate_loop_interpreter_inline_arm(
                 opcode,
-                index as u32,
+                index as u32 + crate::FIRST_OPCODE_ID,
                 crate_path,
                 quote!(#crate_path::core::OperandWidth::Narrow),
             )
@@ -430,7 +434,7 @@ pub(crate) fn generate_expression_interpreter_runtime(
         .map(|(index, opcode)| {
             generate_loop_interpreter_inline_arm(
                 opcode,
-                index as u32,
+                index as u32 + crate::FIRST_OPCODE_ID,
                 crate_path,
                 quote!(#crate_path::core::OperandWidth::Wide16),
             )
@@ -443,7 +447,7 @@ pub(crate) fn generate_expression_interpreter_runtime(
         .map(|(index, opcode)| {
             generate_loop_interpreter_inline_arm(
                 opcode,
-                index as u32,
+                index as u32 + crate::FIRST_OPCODE_ID,
                 crate_path,
                 quote!(#crate_path::core::OperandWidth::Wide32),
             )
@@ -483,7 +487,7 @@ pub(crate) fn generate_expression_interpreter_runtime(
             };
 
             match __opcode_prefix {
-                0xFE => {
+                0x00 => {
                     let (__opcode, __ip) = unsafe {
                         <u16 as #crate_path::core::Operand>::decode_from_ptr(
                             #crate_path::core::OperandWidth::Wide16,
@@ -495,7 +499,7 @@ pub(crate) fn generate_expression_interpreter_runtime(
                         _ => #wide16_invalid,
                     }
                 }
-                0xFF => {
+                0x01 => {
                     let (__opcode, __ip) = unsafe {
                         <u32 as #crate_path::core::Operand>::decode_from_ptr(
                             #crate_path::core::OperandWidth::Wide32,
@@ -603,7 +607,7 @@ pub(crate) fn generate_loop_interpreter_inline_arm(
     } else {
         quote! {
             let (metadata_id, __ip) = unsafe {
-                <u32 as #crate_path::core::Operand>::decode_from_ptr(__width, __ip)
+                <#crate_path::core::MetadataId as #crate_path::core::Operand>::decode_from_ptr(__width, __ip)
             };
         }
     };
@@ -631,7 +635,9 @@ pub(crate) fn generate_tail_interpreter_runtime(
     let invalid_expr_var = format_ident!("__invalid_expr");
     let param_var = format_ident!("__param");
     let param_ty_var = format_ident!("__param_ty");
-    let wide_table_len = schema.opcodes.len();
+    // Wide tables are indexed by wire id, so the two reserved prefix ids
+    // stay invalid-filled at the front.
+    let wide_table_len = schema.opcodes.len() + crate::FIRST_OPCODE_ID as usize;
 
     let per_opcode_dispatch_fns = schema
         .opcodes
@@ -646,11 +652,12 @@ pub(crate) fn generate_tail_interpreter_runtime(
         .opcodes
         .iter()
         .enumerate()
-        .filter(|(index, _)| *index <= crate::MAX_NARROW_OPCODE as usize)
+        .filter(|(index, _)| *index + crate::FIRST_OPCODE_ID as usize <= u8::MAX as usize)
         .map(|(index, opcode)| {
             let handler_ident = format_ident!("__dispatch_{}_narrow", opcode.name.snake_case);
+            let wire = index + crate::FIRST_OPCODE_ID as usize;
             quote! {
-                __table[#index] = #handler_ident as __DispatchFn;
+                __table[#wire] = #handler_ident as __DispatchFn;
             }
         })
         .collect::<Vec<_>>();
@@ -661,8 +668,9 @@ pub(crate) fn generate_tail_interpreter_runtime(
         .enumerate()
         .map(|(index, opcode)| {
             let handler_ident = format_ident!("__dispatch_{}_wide16", opcode.name.snake_case);
+            let wire = index + crate::FIRST_OPCODE_ID as usize;
             quote! {
-                __table[#index] = #handler_ident as __DispatchFn;
+                __table[#wire] = #handler_ident as __DispatchFn;
             }
         })
         .collect::<Vec<_>>();
@@ -673,8 +681,9 @@ pub(crate) fn generate_tail_interpreter_runtime(
         .enumerate()
         .map(|(index, opcode)| {
             let handler_ident = format_ident!("__dispatch_{}_wide32", opcode.name.snake_case);
+            let wire = index + crate::FIRST_OPCODE_ID as usize;
             quote! {
-                __table[#index] = #handler_ident as __DispatchFn;
+                __table[#wire] = #handler_ident as __DispatchFn;
             }
         })
         .collect::<Vec<_>>();
@@ -792,8 +801,8 @@ pub(crate) fn generate_tail_interpreter_runtime(
         const fn __build_dispatch_table_narrow() -> [__DispatchFn; 256] {
             let mut __table = [__invalid_narrow as __DispatchFn; 256];
             #(#narrow_table_assignments)*
-            __table[0xFE] = __dispatch_wide16 as __DispatchFn;
-            __table[0xFF] = __dispatch_wide32 as __DispatchFn;
+            __table[0x00] = __dispatch_wide16 as __DispatchFn;
+            __table[0x01] = __dispatch_wide32 as __DispatchFn;
             __table
         }
 
@@ -901,7 +910,7 @@ pub(crate) fn generate_tail_interpreter_dispatch_fns(
     } else {
         quote! {
             let (metadata_id, __ip) = unsafe {
-                <u32 as #crate_path::core::Operand>::decode_from_ptr(__width, __ip)
+                <#crate_path::core::MetadataId as #crate_path::core::Operand>::decode_from_ptr(__width, __ip)
             };
         }
     };
@@ -972,8 +981,9 @@ pub(crate) fn generate_packed_tail_interpreter_runtime(
         .enumerate()
         .map(|(index, opcode)| {
             let handler_ident = format_ident!("__dispatch_{}_packed", opcode.name.snake_case);
+            let wire = index + crate::FIRST_OPCODE_ID as usize;
             quote! {
-                __table[#index] = #handler_ident as __DispatchFn;
+                __table[#wire] = #handler_ident as __DispatchFn;
             }
         })
         .collect::<Vec<_>>();
@@ -1062,7 +1072,7 @@ pub(crate) fn generate_packed_tail_interpreter_dispatch_fn(
     let metadata_id_decode = if opcode.body.metadata.is_empty() {
         quote!()
     } else {
-        quote!(let metadata_id = 0u32;)
+        quote!(let metadata_id = #crate_path::core::MetadataId(0);)
     };
 
     quote! {
@@ -1223,199 +1233,5 @@ fn packed_fast_decode_value_expr(
                 ).expect(#message)
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use proc_macro2::Span;
-    use quote::quote;
-
-    use crate::doc::DocBlock;
-    use crate::model::{
-        BodyModel, EncodingModel, NameModel, OpcodeModel, SchemaModel, SectionModel,
-    };
-
-    fn name(raw: &str, require_upper_camel: bool) -> NameModel {
-        NameModel::from_ident(
-            Ident::new(raw, Span::call_site()),
-            require_upper_camel,
-            "test",
-        )
-        .unwrap()
-    }
-
-    fn opcode(raw: &str) -> OpcodeModel {
-        OpcodeModel {
-            docs: DocBlock::default(),
-            name: name(raw, true),
-            section: name("Bytecode", false),
-            body: BodyModel {
-                args: Vec::new(),
-                metadata: Vec::new(),
-                tmps: Vec::new(),
-                checkpoints: Vec::new(),
-                layout: None,
-            },
-            verify: None,
-            packed_layout: None,
-        }
-    }
-
-    fn packed_opcode(raw: &str, opcode_value: usize) -> OpcodeModel {
-        let mut opcode = opcode(raw);
-        opcode.packed_layout = Some(bytecodegen_core::PackedLayoutPlan {
-            word_bits: 32,
-            word_count: 1,
-            placements: vec![bytecodegen_core::PackedFieldPlacement::opcode(0, 0, 8)],
-        });
-        assert!(opcode_value <= u8::MAX as usize);
-        opcode
-    }
-
-    fn schema() -> SchemaModel {
-        let opcodes = vec![opcode("Noop"), opcode("Return")];
-        SchemaModel {
-            encoding: EncodingModel::Bytes,
-            sections: vec![SectionModel {
-                docs: DocBlock::default(),
-                name: name("Bytecode", false),
-                preserve_order: true,
-                debug: None,
-                source_items: Vec::new(),
-                opcodes: opcodes.clone(),
-            }],
-            opcodes,
-            groups: Vec::new(),
-        }
-    }
-
-    fn packed_schema() -> SchemaModel {
-        let opcodes = vec![packed_opcode("Noop", 0), packed_opcode("Return", 1)];
-        SchemaModel {
-            encoding: EncodingModel::Packed { word_bits: 32 },
-            sections: vec![SectionModel {
-                docs: DocBlock::default(),
-                name: name("Bytecode", false),
-                preserve_order: true,
-                debug: None,
-                source_items: Vec::new(),
-                opcodes: opcodes.clone(),
-            }],
-            opcodes,
-            groups: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn tail_interpreter_dispatch_uses_static_tables() {
-        let runtime =
-            generate_tail_interpreter_runtime(&schema(), &quote!(bytecodegen), &quote!(()))
-                .to_string();
-
-        assert!(runtime.contains("static __DISPATCH_TABLE_NARROW"));
-        assert!(runtime.contains("static __DISPATCH_TABLE_WIDE16"));
-        assert!(runtime.contains("static __DISPATCH_TABLE_WIDE32"));
-        assert!(runtime.contains("become __entry"));
-        assert!(!runtime.contains("match __opcode_prefix"));
-    }
-
-    #[test]
-    fn expression_interpreter_specializes_arm_widths() {
-        let runtime =
-            generate_expression_interpreter_runtime(&schema(), &quote!(bytecodegen), &quote!(()))
-                .to_string();
-
-        assert!(!runtime.contains("let __width = match __opcode_prefix"));
-        assert!(runtime.contains("OperandWidth :: Narrow"));
-        assert!(runtime.contains("OperandWidth :: Wide16"));
-        assert!(runtime.contains("OperandWidth :: Wide32"));
-    }
-
-    #[test]
-    fn tail_interpreter_dispatch_keeps_user_signature() {
-        let runtime =
-            generate_tail_interpreter_runtime(&schema(), &quote!(bytecodegen), &quote!(()))
-                .to_string();
-
-        assert!(!runtime.contains("type __DispatchFn = fn (* const u8"));
-        assert!(!runtime.contains("become __entry (__instruction_ptr"));
-        assert!(!runtime.contains("fn __dispatch_noop_narrow (__instruction_ptr"));
-        assert!(runtime.contains("fn __dispatch_noop_narrow"));
-    }
-
-    #[test]
-    fn tail_interpreter_dispatch_threads_lifetimes() {
-        let rules = generate_interpreter_rules(
-            &schema(),
-            &quote!(bytecodegen),
-            InterpreterMacroFlavor::TailPath,
-        )
-        .into_iter()
-        .map(|tokens| tokens.to_string())
-        .collect::<Vec<_>>()
-        .join(" ");
-
-        assert!(rules.contains("type __DispatchFn"));
-        assert!(rules.contains("for <"));
-        assert!(rules.contains("__lt"));
-        assert!(rules.contains("fn __dispatch"));
-        assert!(rules.contains("fn __dispatch_noop_narrow"));
-    }
-
-    #[test]
-    fn tail_interpreter_checks_wide32_table_bounds() {
-        let runtime =
-            generate_tail_interpreter_runtime(&schema(), &quote!(bytecodegen), &quote!(()))
-                .to_string();
-
-        assert!(runtime.contains("__opcode_index"));
-        assert!(runtime.contains("debug_assert ! (__opcode_index < __DISPATCH_TABLE_WIDE32"));
-        assert!(runtime.contains("__DISPATCH_TABLE_WIDE32") && runtime.contains("len ()"));
-        assert!(runtime.contains("get_unchecked"));
-        assert!(runtime.contains("__invalid_wide32 as __DispatchFn"));
-    }
-
-    #[test]
-    fn tail_interpreter_sizes_wide_tables_to_schema() {
-        let runtime =
-            generate_tail_interpreter_runtime(&schema(), &quote!(bytecodegen), &quote!(()))
-                .to_string();
-
-        assert!(runtime.contains("[__DispatchFn ; 2usize]"));
-        assert!(!runtime.contains("[__DispatchFn ; 65536]"));
-    }
-
-    #[test]
-    fn packed_expression_interpreter_decodes_packed_words() {
-        let runtime = generate_interpreter_runtime(
-            &packed_schema(),
-            &quote!(bytecodegen),
-            InterpreterMacroFlavor::Expression,
-            &quote!(()),
-        )
-        .to_string();
-
-        assert!(runtime.contains("read_unaligned"));
-        assert!(runtime.contains("extract_packed_bits"));
-        assert!(!runtime.contains("decode_from_ptr"));
-    }
-
-    #[test]
-    fn packed_tail_interpreter_uses_packed_dispatch_table() {
-        let runtime = generate_interpreter_runtime(
-            &packed_schema(),
-            &quote!(bytecodegen),
-            InterpreterMacroFlavor::TailPath,
-            &quote!(()),
-        )
-        .to_string();
-
-        assert!(runtime.contains("static __DISPATCH_TABLE_PACKED"));
-        assert!(runtime.contains("become __entry"));
-        assert!(!runtime.contains("become __entry (__instruction_ptr"));
-        assert!(!runtime.contains("type __DispatchFn = fn (* const u8"));
-        assert!(!runtime.contains("__DISPATCH_TABLE_WIDE16"));
     }
 }

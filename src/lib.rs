@@ -4,13 +4,14 @@ pub use bytecodegen_core as core;
 pub use bytecodegen_core::{
     ByteCursor, ByteSink, DebugId, DebugMap, DebugTable, Decode, DecodeError,
     DefaultOperandFormatter, Disassemble, DisassembleError, DisassemblerOptions, DisassemblyLabel,
-    Emit, EmitError, Encode, FormatOperand, InstructionFormatSpec, InstructionSpec, Label,
-    LinkError, LinkedArtifactSpec, LinkedBytecodeView, LinkedDebugInfo, LinkedInstructionEntry,
-    LinkedProgram, MAX_INSTRUCTION_HEADER_BYTES, MetadataHeaderEntry, MetadataTableLayout,
-    MetadataTableView, MetadataTableViewMut, MetadataTypeSpec, MnemonicCase, NativeHeapBackend,
-    NativeLinkedBytecode, Operand, OperandFormatSpec, OperandWidth, OptionalOperand, PackedDecode,
-    PackedEmit, PackedEncode, PackedOperand, PackedOptionalOperand, Placement, RelocValue,
-    RelocationField, RelocationKind, SliceSink, VerificationError, VerificationResult, Verifier,
+    Emit, EmitError, Encode, FIRST_OPCODE_ID, FormatOperand, InstructionFormatSpec,
+    InstructionSpec, Label, LinkError, LinkedArtifactSpec, LinkedBytecodeView, LinkedDebugInfo,
+    LinkedInstructionEntry, LinkedProgram, MAX_INSTRUCTION_HEADER_BYTES, MetadataHeaderEntry,
+    MetadataId, MetadataTableLayout, MetadataTableView, MetadataTableViewMut, MetadataTypeSpec,
+    MnemonicCase, NativeHeapBackend, NativeLinkedBytecode, Operand, OperandFormatSpec,
+    OperandWidth, OptionalOperand, PackedDecode, PackedEmit, PackedEncode, PackedOperand,
+    PackedOptionalOperand, Placement, RelocValue, RelocationField, RelocationKind, SliceSink,
+    VerificationError, VerificationResult, Verifier, WIDE16_PREFIX, WIDE32_PREFIX,
     decode_instruction_header, decode_instruction_header_from_ptr, encode_instruction_header,
     extract_packed_bits, initialize_metadata_table, insert_packed_bits, instruction_header_len,
     instruction_opcode_fits_width, metadata_slot_ptr, packed_bytes_to_words, packed_mask,
@@ -105,7 +106,10 @@ pub use bytecodegen_macros::Operand;
 /// Field attributes:
 ///
 /// - `#[doc = "..."]` on opcodes and fields
-/// - `#[relocatable]` or `#[relocatable(relative_next)]` for relative relocations
+/// - `#[relocatable]` or `#[relocatable(relative_next)]` for relocations
+///   relative to the end of the instruction
+/// - `#[relocatable(relative_start)]` for relocations relative to the start
+///   of the instruction
 /// - `#[relocatable(absolute)]` for absolute relocations
 /// - `#[verify(stack_balance = N)]` on opcodes
 /// - `#[verify(jump_target_valid)]` on opcodes

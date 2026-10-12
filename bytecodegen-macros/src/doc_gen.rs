@@ -76,17 +76,19 @@ impl DocLayoutWidth {
 
     pub(crate) fn header_bytes(self, opcode_value: u32) -> Option<Vec<u8>> {
         match self {
-            Self::Narrow if opcode_value <= crate::MAX_NARROW_OPCODE => {
+            Self::Narrow
+                if opcode_value >= crate::FIRST_OPCODE_ID && opcode_value <= u8::MAX as u32 =>
+            {
                 Some(vec![opcode_value as u8])
             }
             Self::Narrow => None,
             Self::Wide16 => {
-                let mut bytes = vec![0xFE];
+                let mut bytes = vec![0x00];
                 bytes.extend_from_slice(&(opcode_value as u16).to_le_bytes());
                 Some(bytes)
             }
             Self::Wide32 => {
-                let mut bytes = vec![0xFF];
+                let mut bytes = vec![0x01];
                 bytes.extend_from_slice(&opcode_value.to_le_bytes());
                 Some(bytes)
             }
@@ -211,7 +213,7 @@ pub(crate) fn opcode_width_doc_lines(
 
     let Some(header_bytes) = width.header_bytes(opcode_value) else {
         docs.push(format!(
-            "`Narrow` layout is unavailable because opcode id `{opcode_value}` exceeds `0xFD`."
+            "`Narrow` layout is unavailable because opcode id `{opcode_value}` exceeds `0xFF`."
         ));
         return docs;
     };
