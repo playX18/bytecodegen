@@ -46,11 +46,11 @@ dependencies = [
 
 [[package]]
 name = "bytecodegen-core"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "bytecodegen-macros"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytecodegen-core",
  "proc-macro-crate",

@@ -2,10 +2,13 @@
 name = "bytecodegen-macros"
 version.workspace = true
 edition.workspace = true
+description = "Procedural macros for bytecodegen: the bytecode_list! schema DSL and instruction code generation"
 license = "BSD-3-Clause"
 repository = "https://github.com/playx18/bytecodegen"
 documentation = "https://docs.rs/bytecodegen-macros"
 readme = "README.md"
+keywords = ["bytecode", "codegen", "dsl", "macros", "proc-macro"]
+categories = ["development-tools", "compilers"]
 
 [lib]
 proc-macro = true

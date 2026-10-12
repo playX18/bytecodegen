@@ -2,10 +2,13 @@
 name = "bytecodegen"
 version = "0.2.0"
 edition = "2024"
+description = "Declare bytecode instruction schemas once and generate typed instructions, encoding, linking, verification, and disassembly"
 readme = "README.md"
 license = "BSD-3-Clause"
 repository = "https://github.com/playx18/bytecodegen"
 documentation = "https://docs.rs/bytecodegen"
+keywords = ["bytecode", "codegen", "dsl", "macros", "vm"]
+categories = ["development-tools", "compilers"]
 
 [workspace]
 members = [".", "bytecodegen-core", "bytecodegen-macros"]
@@ -23,7 +26,7 @@ harness = false
 
 [workspace.package]
 edition = "2024"
-version = "0.1.0"
+version = "0.2.0"
 
 [workspace.dependencies]
 proc-macro2 = "1.0.103"
