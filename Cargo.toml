@@ -11,8 +11,8 @@ documentation = "https://docs.rs/bytecodegen"
 members = [".", "bytecodegen-core", "bytecodegen-macros"]
 
 [dependencies]
-bytecodegen-core = { path = "bytecodegen-core" }
-bytecodegen-macros = { path = "bytecodegen-macros" }
+bytecodegen-core = { version = "0.2.0", path = "bytecodegen-core" }
+bytecodegen-macros = { version = "0.2.0", path = "bytecodegen-macros" }
 
 [dev-dependencies]
 criterion = "0.7"
