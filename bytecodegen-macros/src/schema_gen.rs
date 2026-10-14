@@ -429,7 +429,7 @@ pub(crate) fn generate_schema(schema: &SchemaModel, crate_path: &TokenStream2) -
     });
 
     // Flat metadata area: per-kind arrays behind a `[K u32 offsets]
-    // [K u32 counts][u64 buffer]` header, for VMs that manage metadata
+    // [K u32 counts]` header, for VMs that manage metadata
     // storage themselves instead of using the linker's table.
     let num_metadata_kinds = metadata_kinds.iter().filter(|kind| kind.is_some()).count();
     let flat_layout_new_arms: Vec<TokenStream2> = schema
@@ -2554,12 +2554,6 @@ pub(crate) fn generate_schema(schema: &SchemaModel, crate_path: &TokenStream2) -
             /// Number of metadata kinds: opcodes with a `metadata` block.
             pub const NUM_METADATA_KINDS: usize = #num_metadata_kinds;
 
-            /// Byte offset of the buffer word from a flat area start: the
-            /// owning code buffer's address, written once at creation.
-            /// Records start after it; their offsets adapt through the
-            /// header table.
-            pub const METADATA_BUFFER_OFFSET: usize = NUM_METADATA_KINDS * 8;
-
             /// Where each kind's array lives inside a flat metadata area.
             #[derive(Clone, Debug)]
             pub struct MetadataLayout {
@@ -2574,9 +2568,8 @@ pub(crate) fn generate_schema(schema: &SchemaModel, crate_path: &TokenStream2) -
             impl MetadataLayout {
                 pub fn new(counts: &[u32; NUM_METADATA_KINDS]) -> Self {
                     let mut offsets = [0u32; NUM_METADATA_KINDS];
-                    // Header: offsets then counts, both u32 * K, then the
-                    // 8-byte buffer word (always 8-aligned: K * 8 + 8).
-                    let mut size: usize = NUM_METADATA_KINDS * 8 + 8;
+                    // Header: offsets then counts, both u32 * K.
+                    let mut size: usize = NUM_METADATA_KINDS * 8;
                     let mut align: usize = 1;
                     #(#flat_layout_new_arms)*
                     if counts.iter().all(|count| *count == 0) {
